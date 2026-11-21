@@ -1,0 +1,524 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  SALES
+  WAREHOUSE
+  TECHNICIAN
+  SUPPORT
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  SURVEY_SCHEDULED
+  SURVEY_APPROVED
+  QUOTED
+  CONVERTED
+  LOST
+}
+
+enum SurveyStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SystemType {
+  ON_GRID
+  OFF_GRID
+}
+
+enum ProductCategory {
+  PANEL
+  INVERTER
+  BATTERY
+  CHARGE_CONTROLLER
+  WIRING_BOX
+  EARTHING
+  STAND
+  CONNECTOR
+  WIRE
+  SWITCH
+  OTHER
+}
+
+enum QuoteStatus {
+  DRAFT
+  SENT
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+enum OrderStatus {
+  CONFIRMED
+  DISPATCHED
+  INSTALLED
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentType {
+  ADVANCE
+  FULL
+  BALANCE
+  SERVICE
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CARD
+  OTHER
+}
+
+enum EquipmentStatus {
+  IN_STOCK
+  RESERVED
+  DISPATCHED
+  INSTALLED
+  RETURNED
+  FAULTY
+}
+
+enum DispatchStatus {
+  PREPARED
+  DISPATCHED
+  DELIVERED
+}
+
+enum ServiceTicketStatus {
+  OPEN
+  IN_PROGRESS
+  AWAITING_PARTS
+  RESOLVED
+  CLOSED
+}
+
+enum StockMovementType {
+  INBOUND
+  OUTBOUND
+  RESERVED
+  RELEASED
+  ADJUSTMENT
+}
+
+enum JobExpenseType {
+  TECHNICIAN_LABOUR
+  TRANSPORT
+  MISC
+}
+
+model User {
+  id                      String               @id @default(cuid())
+  name                    String
+  email                   String               @unique
+  phone                   String               @unique
+  passwordHash            String
+  role                    Role
+  isActive                Boolean              @default(true)
+  createdAt               DateTime             @default(now())
+  leadsAssigned           Lead[]               @relation("LeadSales")
+  surveysConducted        SiteSurvey[]         @relation("SurveyConductor")
+  surveysApproved         SiteSurvey[]         @relation("SurveyApprover")
+  stockMovementsCreated   StockMovement[]      @relation("StockMovementCreator")
+  quotesCreated           Quote[]              @relation("QuoteCreator")
+  paymentsRecorded        Payment[]            @relation("PaymentRecorder")
+  dispatchesCreated       Dispatch[]           @relation("DispatchCreator")
+  installationsAssigned   InstallationRecord[] @relation("Technician")
+  ticketsAssigned         ServiceTicket[]      @relation("TicketAssignee")
+  jobExpensesRecorded     JobExpense[]         @relation("JobExpenseRecorder")
+
+  @@index([role])
+}
+
+model Customer {
+  id        String              @id @default(cuid())
+  name      String
+  phone     String              @unique
+  email     String?
+  address   String
+  createdAt DateTime            @default(now())
+  leads     Lead[]
+  orders    InstallationOrder[]
+  tickets   ServiceTicket[]
+  quotes    Quote[]
+  equipment SerializedEquipment[] @relation("EquipmentCustomer")
+  warranties Warranty[]
+}
+
+model Lead {
+  id                    String       @id @default(cuid())
+  customerId            String
+  assignedSalesUserId   String?
+  requestedCapacityKw   Float
+  systemTypeInterest    SystemType?
+  subsidyInterest       Boolean      @default(false)
+  shadowFreeRoofAreaSqm Float?
+  avgMonthlyBillInr     Float?
+  gridSuitable          Boolean?
+  status                LeadStatus   @default(NEW)
+  source                String?
+  notes                 String?
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  customer              Customer     @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  assignedSales         User?        @relation("LeadSales", fields: [assignedSalesUserId], references: [id], onDelete: Restrict)
+  survey                SiteSurvey?
+  quotes                Quote[]
+
+  @@index([customerId])
+  @@index([assignedSalesUserId])
+  @@index([status])
+}
+
+model SiteSurvey {
+  id                  String       @id @default(cuid())
+  leadId              String       @unique
+  conductedByUserId   String
+  roofDirection       String
+  roofTiltDegrees     Float
+  cableDistanceMeters Float
+  status              SurveyStatus @default(PENDING)
+  submittedAt         DateTime     @default(now())
+  approvedByUserId    String?
+  approvedAt          DateTime?
+  rejectionReason     String?
+  lead                Lead         @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  conductedBy         User         @relation("SurveyConductor", fields: [conductedByUserId], references: [id], onDelete: Restrict)
+  approvedBy          User?        @relation("SurveyApprover", fields: [approvedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([conductedByUserId])
+  @@index([approvedByUserId])
+  @@index([status])
+}
+
+model Product {
+  id                String            @id @default(cuid())
+  sku               String            @unique
+  name              String
+  category          ProductCategory
+  isSerialized      Boolean
+  unitPrice         Decimal
+  unit              String
+  warrantyMonths    Int               @default(0)
+  isActive          Boolean           @default(true)
+  createdAt         DateTime          @default(now())
+  inventory         Inventory?
+  stockMovements    StockMovement[]
+  bomTemplateItems  BOMTemplateItem[]
+  quoteItems        QuoteItem[]
+  serializedUnits   SerializedEquipment[]
+  dispatchItems     DispatchItem[]
+
+  @@index([category])
+}
+
+model Inventory {
+  id                String   @id @default(cuid())
+  productId         String   @unique
+  quantityOnHand    Int      @default(0)
+  reorderLevel      Int      @default(0)
+  warehouseLocation String?
+  updatedAt         DateTime @updatedAt
+  product           Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+}
+
+model StockMovement {
+  id              String            @id @default(cuid())
+  productId       String
+  type            StockMovementType
+  quantity        Int
+  referenceType   String
+  referenceId     String?
+  createdByUserId String
+  createdAt       DateTime          @default(now())
+  product         Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
+  createdBy       User              @relation("StockMovementCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([productId])
+  @@index([createdByUserId])
+  @@index([createdAt])
+  @@index([productId, createdAt])
+}
+
+model BOMTemplate {
+  id            String           @id @default(cuid())
+  name          String
+  systemType    SystemType
+  minCapacityKw Float
+  maxCapacityKw Float
+  description   String?
+  isActive      Boolean          @default(true)
+  items         BOMTemplateItem[]
+  quotes        Quote[]
+
+  @@index([systemType, minCapacityKw, maxCapacityKw])
+}
+
+model BOMTemplateItem {
+  id            String      @id @default(cuid())
+  bomTemplateId String
+  productId     String
+  quantityPerKw Float?
+  quantityFixed Int?
+  notes         String?
+  bomTemplate   BOMTemplate @relation(fields: [bomTemplateId], references: [id], onDelete: Cascade)
+  product       Product     @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([bomTemplateId])
+  @@index([productId])
+}
+
+model Quote {
+  id              String        @id @default(cuid())
+  leadId          String
+  customerId      String
+  bomTemplateId   String
+  systemType      SystemType
+  capacityKw      Float
+  subtotal        Decimal
+  discount        Decimal       @default(0)
+  tax             Decimal       @default(0)
+  total           Decimal
+  status          QuoteStatus   @default(DRAFT)
+  validUntil      DateTime?
+  createdByUserId String
+  createdAt       DateTime      @default(now())
+  lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Restrict)
+  customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  bomTemplate     BOMTemplate   @relation(fields: [bomTemplateId], references: [id], onDelete: Restrict)
+  createdBy       User          @relation("QuoteCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  items           QuoteItem[]
+  order           InstallationOrder?
+
+  @@index([leadId])
+  @@index([customerId])
+  @@index([bomTemplateId])
+  @@index([createdByUserId])
+  @@index([status])
+}
+
+model QuoteItem {
+  id               String  @id @default(cuid())
+  quoteId          String
+  productId        String
+  quantity         Int
+  unitPriceAtQuote Decimal
+  lineTotal        Decimal
+  quote            Quote   @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  product          Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([quoteId])
+  @@index([productId])
+}
+
+model InstallationOrder {
+  id                   String               @id @default(cuid())
+  quoteId              String               @unique
+  customerId           String
+  status               OrderStatus          @default(CONFIRMED)
+  totalAmount          Decimal
+  advancePaid          Decimal              @default(0)
+  balanceDue           Decimal
+  scheduledDate        DateTime?
+  createdAt            DateTime             @default(now())
+  quote                Quote                @relation(fields: [quoteId], references: [id], onDelete: Restrict)
+  customer             Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  payments             Payment[]
+  dispatches           Dispatch[]
+  serializedEquipment  SerializedEquipment[]
+  installationRecord   InstallationRecord?
+  jobExpenses          JobExpense[]
+  serviceTickets       ServiceTicket[]
+  warranties           Warranty[]
+
+  @@index([customerId])
+  @@index([status])
+}
+
+model Payment {
+  id                   String        @id @default(cuid())
+  installationOrderId  String
+  amount               Decimal
+  type                 PaymentType
+  method               PaymentMethod
+  recordedByUserId     String
+  paidAt               DateTime      @default(now())
+  order                InstallationOrder @relation(fields: [installationOrderId], references: [id], onDelete: Restrict)
+  recordedBy           User          @relation("PaymentRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([installationOrderId])
+  @@index([recordedByUserId])
+  @@index([paidAt])
+}
+
+model SerializedEquipment {
+  id                  String          @id @default(cuid())
+  serialNumber        String          @unique
+  productId           String
+  status              EquipmentStatus @default(IN_STOCK)
+  installationOrderId String?
+  dispatchId          String?
+  currentCustomerId   String?
+  manufacturer        String?
+  model               String?
+  receivedAt          DateTime        @default(now())
+  deliveredAt         DateTime?
+  product             Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+  installationOrder   InstallationOrder? @relation(fields: [installationOrderId], references: [id], onDelete: Restrict)
+  dispatch            Dispatch?       @relation(fields: [dispatchId], references: [id], onDelete: Restrict)
+  currentCustomer     Customer?       @relation("EquipmentCustomer", fields: [currentCustomerId], references: [id], onDelete: Restrict)
+  warranty            Warranty?
+  serviceTickets      ServiceTicket[]
+
+  @@index([productId])
+  @@index([status])
+  @@index([installationOrderId])
+  @@index([dispatchId])
+  @@index([currentCustomerId])
+}
+
+model Dispatch {
+  id                  String            @id @default(cuid())
+  installationOrderId String
+  dispatchedByUserId  String
+  status              DispatchStatus    @default(PREPARED)
+  dispatchDate        DateTime?
+  deliveredDate       DateTime?
+  vehicleNotes        String?
+  createdAt           DateTime          @default(now())
+  order               InstallationOrder @relation(fields: [installationOrderId], references: [id], onDelete: Restrict)
+  dispatchedBy        User              @relation("DispatchCreator", fields: [dispatchedByUserId], references: [id], onDelete: Restrict)
+  items               DispatchItem[]
+  equipment           SerializedEquipment[]
+
+  @@index([installationOrderId])
+  @@index([dispatchedByUserId])
+  @@index([status])
+}
+
+model DispatchItem {
+  id         String   @id @default(cuid())
+  dispatchId String
+  productId  String
+  quantity   Int
+  dispatch   Dispatch @relation(fields: [dispatchId], references: [id], onDelete: Cascade)
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([dispatchId])
+  @@index([productId])
+}
+
+model InstallationRecord {
+  id                   String          @id @default(cuid())
+  installationOrderId  String          @unique
+  technicianUserId     String
+  scheduledDate        DateTime?
+  startedAt            DateTime?
+  completedAt          DateTime?
+  confirmedCapacityKw  Float?
+  checklistJson        String          @default("{}")
+  signatureImagePath   String?
+  customerSignedName   String?
+  status               OrderStatus     @default(CONFIRMED)
+  order                InstallationOrder @relation(fields: [installationOrderId], references: [id], onDelete: Restrict)
+  technician           User            @relation("Technician", fields: [technicianUserId], references: [id], onDelete: Restrict)
+  photos               InstallationPhoto[]
+
+  @@index([technicianUserId])
+}
+
+model InstallationPhoto {
+  id                   String            @id @default(cuid())
+  installationRecordId String
+  filePath             String
+  caption              String?
+  uploadedAt           DateTime          @default(now())
+  record               InstallationRecord @relation(fields: [installationRecordId], references: [id], onDelete: Cascade)
+
+  @@index([installationRecordId])
+}
+
+model Warranty {
+  id                    String              @id @default(cuid())
+  serializedEquipmentId String              @unique
+  installationOrderId   String
+  customerId            String
+  warrantyStartDate     DateTime
+  warrantyMonths        Int
+  warrantyExpiryDate    DateTime
+  voidedAt              DateTime?
+  voidReason            String?
+  createdAt             DateTime            @default(now())
+  equipment             SerializedEquipment @relation(fields: [serializedEquipmentId], references: [id], onDelete: Restrict)
+  installationOrder     InstallationOrder   @relation(fields: [installationOrderId], references: [id], onDelete: Restrict)
+  customer              Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([installationOrderId])
+  @@index([customerId])
+  @@index([warrantyExpiryDate])
+}
+
+model ServiceTicket {
+  id                    String             @id @default(cuid())
+  ticketNumber          String             @unique
+  customerId            String
+  serializedEquipmentId String?
+  installationOrderId   String?
+  issueDescription      String
+  faultCode             String?
+  warrantyCovered       Boolean
+  status                ServiceTicketStatus @default(OPEN)
+  assignedUserId        String?
+  createdAt             DateTime           @default(now())
+  resolvedAt            DateTime?
+  customer              Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  equipment             SerializedEquipment? @relation(fields: [serializedEquipmentId], references: [id], onDelete: Restrict)
+  order                 InstallationOrder? @relation(fields: [installationOrderId], references: [id], onDelete: Restrict)
+  assignedUser          User?              @relation("TicketAssignee", fields: [assignedUserId], references: [id], onDelete: Restrict)
+  charges               ServiceTicketCharge[]
+
+  @@index([customerId])
+  @@index([serializedEquipmentId])
+  @@index([installationOrderId])
+  @@index([assignedUserId])
+  @@index([status])
+}
+
+model ServiceTicketCharge {
+  id              String       @id @default(cuid())
+  serviceTicketId String
+  description     String
+  amount          Decimal
+  type            String
+  ticket          ServiceTicket @relation(fields: [serviceTicketId], references: [id], onDelete: Cascade)
+
+  @@index([serviceTicketId])
+}
+
+model JobExpense {
+  id                   String        @id @default(cuid())
+  installationOrderId  String
+  type                 JobExpenseType
+  amount               Decimal
+  description          String?
+  incurredAt           DateTime      @default(now())
+  recordedByUserId     String
+  order                InstallationOrder @relation(fields: [installationOrderId], references: [id], onDelete: Restrict)
+  recordedBy           User          @relation("JobExpenseRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([installationOrderId])
+  @@index([recordedByUserId])
+  @@index([incurredAt])
+}
