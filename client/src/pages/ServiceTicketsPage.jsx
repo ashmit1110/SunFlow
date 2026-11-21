@@ -45,13 +45,8 @@ export function ServiceTicketsPage() {
         setTickets([]);
       }
     } catch (err) {
-      if (err.status === 404) {
-        setIsBackendPending(true);
-        setTickets(mockServiceTickets);
-      } else {
-        setApiError(err.message || 'Failed to load service tickets');
-        setTickets([]);
-      }
+      setApiError(err.message || 'Failed to load service tickets');
+      setTickets([]);
     } finally {
       setIsLoading(false);
     }

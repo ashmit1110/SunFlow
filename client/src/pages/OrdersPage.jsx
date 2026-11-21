@@ -46,14 +46,8 @@ export function OrdersPage() {
         setOrders([]);
       }
     } catch (err) {
-      if (err.status === 404) {
-        setIsBackendPending(true);
-        // Display realistic mock data with clear notice so reviewer can test UI
-        setOrders(mockProfitability);
-      } else {
-        setApiError(err.message || 'Failed to fetch installation orders');
-        setOrders([]);
-      }
+      setApiError(err.message || 'Failed to fetch installation orders');
+      setOrders([]);
     } finally {
       setIsLoading(false);
     }
@@ -268,8 +262,8 @@ export function OrdersPage() {
                 className="w-full text-xs rounded-lg border border-slate-300 p-2 bg-white text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500"
               >
                 <option value="ADVANCE">ADVANCE (Booking)</option>
-                <option value="MILESTONE">MILESTONE (Dispatch/Delivery)</option>
-                <option value="FINAL">FINAL (Post-Installation)</option>
+                <option value="BALANCE">BALANCE (Milestone / Delivery)</option>
+                <option value="FULL">FULL (Complete Payment)</option>
               </select>
             </div>
 
@@ -284,8 +278,9 @@ export function OrdersPage() {
               >
                 <option value="UPI">UPI / QR</option>
                 <option value="BANK_TRANSFER">Bank NEFT / RTGS</option>
-                <option value="CHEQUE">Cheque</option>
+                <option value="CARD">Debit / Credit Card</option>
                 <option value="CASH">Cash</option>
+                <option value="OTHER">Cheque / Other</option>
               </select>
             </div>
           </div>

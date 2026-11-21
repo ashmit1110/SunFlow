@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Wrench,
   CheckSquare,
@@ -8,25 +8,37 @@ import {
   MapPin,
   CheckCircle2,
   AlertCircle,
-  Info,
+  Play,
+  Upload,
 } from 'lucide-react';
 import PageContainer from '../layouts/PageContainer';
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import Input from '../components/ui/Input';
+import Modal from '../components/ui/Modal';
 import Loading from '../components/ui/Loading';
 import EmptyState from '../components/ui/EmptyState';
 import installationService from '../services/installationService';
-import { mockInstallations } from '../services/mockData';
 
 export function TechnicianPortalPage() {
   const [installations, setInstallations] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [apiError, setApiError] = useState(null);
-  const [isBackendPending, setIsBackendPending] = useState(false);
   const [submittingJobId, setSubmittingJobId] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [actionSuccess, setActionSuccess] = useState(null);
+
+  // Upload Photos State
+  const [activePhotoJobId, setActivePhotoJobId] = useState(null);
+  const photoInputRef = useRef(null);
+
+  // Signature Modal State
+  const [signatureModalOpen, setSignatureModalOpen] = useState(false);
+  const [signatureJob, setSignatureJob] = useState(null);
+  const [signerName, setSignerName] = useState('');
+  const [signatureFile, setSignatureFile] = useState(null);
+  const [isUploadingSignature, setIsUploadingSignature] = useState(false);
 
   useEffect(() => {
     fetchJobs();
@@ -35,7 +47,6 @@ export function TechnicianPortalPage() {
   const fetchJobs = async () => {
     setIsLoading(true);
     setApiError(null);
-    setIsBackendPending(false);
 
     try {
       const response = await installationService.getMyInstallations();
@@ -46,15 +57,106 @@ export function TechnicianPortalPage() {
         setInstallations([]);
       }
     } catch (err) {
-      if (err.status === 404) {
-        setIsBackendPending(true);
-        setInstallations(mockInstallations);
-      } else {
-        setApiError(err.message || 'Failed to load technician assigned jobs');
-        setInstallations([]);
-      }
+      setApiError(err.message || 'Failed to load technician assigned jobs');
+      setInstallations([]);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleStartInstallation = async (jobId) => {
+    setSubmittingJobId(jobId);
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await installationService.startInstallation(jobId);
+      setActionSuccess(`Installation #${jobId} started.`);
+      fetchJobs();
+    } catch (err) {
+      setActionError(err.message || `Failed to start installation #${jobId}`);
+    } finally {
+      setSubmittingJobId(null);
+    }
+  };
+
+  const handleToggleChecklist = async (job, field, currentVal) => {
+    const existingChecklist = typeof job.checklist === 'object' && job.checklist !== null
+      ? job.checklist
+      : (typeof job.checklistJson === 'string' ? JSON.parse(job.checklistJson || '{}') : {});
+
+    const updatedChecklist = {
+      ...existingChecklist,
+      [field]: !currentVal,
+    };
+
+    try {
+      await installationService.updateChecklist(job.id, { checklist: updatedChecklist });
+      fetchJobs();
+    } catch (err) {
+      setActionError(err.message || 'Failed to update checklist item');
+    }
+  };
+
+  const handleTriggerPhotoUpload = (jobId) => {
+    setActivePhotoJobId(jobId);
+    if (photoInputRef.current) {
+      photoInputRef.current.value = '';
+      photoInputRef.current.click();
+    }
+  };
+
+  const handlePhotoFilesSelected = async (e) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !activePhotoJobId) return;
+
+    setActionError(null);
+    setActionSuccess(null);
+    const formData = new FormData();
+    for (let i = 0; i < Math.min(files.length, 10); i++) {
+      formData.append('photos', files[i]);
+    }
+
+    try {
+      await installationService.uploadPhoto(activePhotoJobId, formData);
+      setActionSuccess(`${files.length} installation photo(s) uploaded successfully.`);
+      fetchJobs();
+    } catch (err) {
+      setActionError(err.message || 'Failed to upload installation photos');
+    } finally {
+      setActivePhotoJobId(null);
+    }
+  };
+
+  const handleOpenSignatureModal = (job) => {
+    setSignatureJob(job);
+    setSignerName(job.customerName || job.order?.customer?.name || '');
+    setSignatureFile(null);
+    setSignatureModalOpen(true);
+  };
+
+  const handleUploadSignature = async (e) => {
+    e.preventDefault();
+    if (!signatureJob || !signatureFile || !signerName.trim()) {
+      setActionError('Customer name and signature file are both required.');
+      return;
+    }
+
+    setIsUploadingSignature(true);
+    setActionError(null);
+    const formData = new FormData();
+    formData.append('signature', signatureFile);
+    formData.append('customerSignedName', signerName.trim());
+
+    try {
+      await installationService.uploadSignature(signatureJob.id, formData);
+      setActionSuccess('Customer e-signature uploaded and recorded.');
+      setSignatureModalOpen(false);
+      fetchJobs();
+    } catch (err) {
+      setActionError(err.message || 'Failed to upload customer signature');
+    } finally {
+      setIsUploadingSignature(false);
     }
   };
 
@@ -65,15 +167,14 @@ export function TechnicianPortalPage() {
 
     try {
       const payload = {
-        confirmedCapacityKw: job.capacityKw || 3,
-        customerSignedName: job.customerName || 'Customer',
+        confirmedCapacityKw: job.confirmedCapacityKw || job.capacityKw || 3,
+        customerSignedName: job.customerSignedName || job.customerName || job.order?.customer?.name || 'Customer',
       };
 
-      const response = await installationService.completeInstallation(job.id, payload);
-      setActionSuccess(`Job #${job.id} marked complete. Order status advanced to INSTALLED.`);
+      await installationService.completeInstallation(job.id, payload);
+      setActionSuccess(`Job #${job.id} marked complete. Order status advanced to INSTALLED and warranties registered.`);
       fetchJobs();
     } catch (err) {
-      // Display actual backend error (e.g. 409 Conflict if signature missing, or 422 if checklist incomplete)
       setActionError(err.message || `Failed to complete installation #${job.id}`);
     } finally {
       setSubmittingJobId(null);
@@ -85,15 +186,15 @@ export function TechnicianPortalPage() {
       title="Technician Field Portal"
       subtitle="Mobile-friendly installation checklists, photo evidence, and customer e-signature capture (FR-090 / FR-094)"
     >
-      {/* Backend Integration Pending Notice */}
-      {isBackendPending && (
-        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
-          <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
-          <div className="text-xs text-amber-900 leading-relaxed">
-            <strong>Backend Integration Notice:</strong> The Technician Field Service API (<code>GET /api/installations/my</code>) is pending deployment on the backend. Displaying layout preview below. Technician job assignments and atomic completion cascades (transaction T2) will sync live once deployed.
-          </div>
-        </div>
-      )}
+      {/* Hidden Photo Upload Input */}
+      <input
+        type="file"
+        ref={photoInputRef}
+        onChange={handlePhotoFilesSelected}
+        multiple
+        accept="image/png,image/jpeg"
+        className="hidden"
+      />
 
       {apiError && (
         <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
@@ -143,6 +244,9 @@ export function TechnicianPortalPage() {
           {installations.map((job) => {
             const isSubmitting = submittingJobId === job.id;
             const isInstalled = job.status === 'INSTALLED';
+            const checklist = typeof job.checklist === 'object' && job.checklist !== null
+              ? job.checklist
+              : (typeof job.checklistJson === 'string' ? JSON.parse(job.checklistJson || '{}') : {});
 
             return (
               <Card key={job.id} className="border-slate-300 shadow-sm flex flex-col justify-between">
@@ -167,7 +271,7 @@ export function TechnicianPortalPage() {
                     </div>
                     <div>
                       <span className="text-slate-400 block font-medium">Scheduled Date</span>
-                      <span className="font-medium text-slate-700">{job.scheduledDate || 'Today'}</span>
+                      <span className="font-medium text-slate-700">{job.scheduledDate ? new Date(job.scheduledDate).toLocaleDateString() : 'Today'}</span>
                     </div>
                     <div>
                       <span className="text-slate-400 block font-medium">Order ID</span>
@@ -181,49 +285,60 @@ export function TechnicianPortalPage() {
                       Installation Completion Checklist
                     </span>
                     <div className="grid grid-cols-2 gap-2 text-xs">
-                      <label className="flex items-center gap-2 p-2 rounded-md bg-white border border-slate-200">
-                        <input
-                          type="checkbox"
-                          defaultChecked={job.checklist?.panelsMounted}
-                          className="rounded text-amber-500 focus:ring-amber-500"
-                        />
-                        <span>Panels Mounted</span>
-                      </label>
-                      <label className="flex items-center gap-2 p-2 rounded-md bg-white border border-slate-200">
-                        <input
-                          type="checkbox"
-                          defaultChecked={job.checklist?.inverterConnected}
-                          className="rounded text-amber-500 focus:ring-amber-500"
-                        />
-                        <span>Inverter Wired</span>
-                      </label>
-                      <label className="flex items-center gap-2 p-2 rounded-md bg-white border border-slate-200">
-                        <input
-                          type="checkbox"
-                          defaultChecked={job.checklist?.earthingTested}
-                          className="rounded text-amber-500 focus:ring-amber-500"
-                        />
-                        <span>Earthing Tested</span>
-                      </label>
-                      <label className="flex items-center gap-2 p-2 rounded-md bg-white border border-slate-200">
-                        <input
-                          type="checkbox"
-                          defaultChecked={job.checklist?.generationTested}
-                          className="rounded text-amber-500 focus:ring-amber-500"
-                        />
-                        <span>Generation Tested</span>
-                      </label>
+                      {[
+                        { key: 'panelsMounted', label: 'Panels Mounted' },
+                        { key: 'inverterConnected', label: 'Inverter Wired' },
+                        { key: 'earthingTested', label: 'Earthing Tested' },
+                        { key: 'generationTested', label: 'Generation Tested' },
+                      ].map(({ key, label }) => {
+                        const isChecked = !!checklist[key];
+                        return (
+                          <label key={key} className="flex items-center gap-2 p-2 rounded-md bg-white border border-slate-200 cursor-pointer hover:bg-slate-50">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={isInstalled}
+                              onChange={() => handleToggleChecklist(job, key, isChecked)}
+                              className="rounded text-amber-500 focus:ring-amber-500"
+                            />
+                            <span>{label}</span>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 </CardContent>
 
-                <CardFooter className="flex flex-wrap items-center justify-between gap-2">
+                <CardFooter className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3">
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="xs" leftIcon={<Camera className="w-3.5 h-3.5" />}>
+                    {!job.startedAt && !isInstalled && (
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        leftIcon={<Play className="w-3.5 h-3.5 text-blue-600" />}
+                        disabled={isSubmitting}
+                        onClick={() => handleStartInstallation(job.id)}
+                      >
+                        Start Job
+                      </Button>
+                    )}
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      leftIcon={<Camera className="w-3.5 h-3.5" />}
+                      onClick={() => handleTriggerPhotoUpload(job.id)}
+                      disabled={isInstalled}
+                    >
                       Upload Photos
                     </Button>
-                    <Button variant="outline" size="xs" leftIcon={<FileSignature className="w-3.5 h-3.5" />}>
-                      E-Signature
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      leftIcon={<FileSignature className="w-3.5 h-3.5" />}
+                      onClick={() => handleOpenSignatureModal(job)}
+                      disabled={isInstalled}
+                    >
+                      {job.signatureImagePath ? 'Signature Recorded' : 'E-Signature'}
                     </Button>
                   </div>
                   <Button
@@ -242,6 +357,64 @@ export function TechnicianPortalPage() {
           })}
         </div>
       )}
+
+      {/* Signature Modal */}
+      <Modal
+        isOpen={signatureModalOpen}
+        onClose={() => setSignatureModalOpen(false)}
+        title="Customer E-Signature & Handover (FR-093)"
+        description={`Record signed customer acceptance for installation job #${signatureJob?.id || ''}`}
+      >
+        <form onSubmit={handleUploadSignature} className="space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">
+              Customer Signed Full Name *
+            </label>
+            <Input
+              type="text"
+              required
+              value={signerName}
+              onChange={(e) => setSignerName(e.target.value)}
+              placeholder="Full name of customer signing"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-700 mb-1">
+              Signature Image File (PNG / JPEG) *
+            </label>
+            <input
+              type="file"
+              required
+              accept="image/png,image/jpeg"
+              onChange={(e) => setSignatureFile(e.target.files?.[0] || null)}
+              className="text-xs file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-amber-50 file:text-amber-700 hover:file:bg-amber-100"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setSignatureModalOpen(false)}
+              disabled={isUploadingSignature}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              disabled={isUploadingSignature || !signatureFile}
+              isLoading={isUploadingSignature}
+              leftIcon={<Upload className="w-3.5 h-3.5" />}
+            >
+              Save Signature
+            </Button>
+          </div>
+        </form>
+      </Modal>
     </PageContainer>
   );
 }
