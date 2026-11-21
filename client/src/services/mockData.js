@@ -5,7 +5,7 @@
  */
 
 export const mockUsers = [
-  { id: 'usr_admin_1', name: 'Vikram Mehta', email: 'vikram@sunpower.demo', role: 'ADMIN' },
+  { id: 'usr_admin_1', name: 'Vikram Shah', email: 'admin@sunpower.demo', role: 'ADMIN' },
   { id: 'usr_sales_1', name: 'Priya Sharma', email: 'priya@sunpower.demo', role: 'SALES' },
   { id: 'usr_warehouse_1', name: 'Raghav Patel', email: 'raghav@sunpower.demo', role: 'WAREHOUSE' },
   { id: 'usr_tech_1', name: 'Arjun Rao', email: 'arjun@sunpower.demo', role: 'TECHNICIAN' },

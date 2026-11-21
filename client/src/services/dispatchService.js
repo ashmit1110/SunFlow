@@ -6,6 +6,13 @@ import apiClient from './apiClient';
  */
 export const dispatchService = {
   /**
+   * GET /api/dispatches
+   */
+  async getDispatches(params = {}) {
+    return apiClient.get('/dispatches', params);
+  },
+
+  /**
    * POST /api/orders/:id/dispatches
    */
   async createDispatch(orderId, dispatchData) {

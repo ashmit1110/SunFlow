@@ -30,7 +30,7 @@ const navigationGroups = [
       { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN'] },
       { name: 'Leads Pipeline', path: '/leads', icon: UserCheck, roles: ['ADMIN', 'SALES'] },
       { name: 'Customers', path: '/customers', icon: Users, roles: ['ADMIN', 'SALES', 'SUPPORT'] },
-      { name: 'Site Surveys', path: '/surveys', icon: Compass, roles: ['ADMIN', 'SALES', 'TECHNICIAN'] },
+      { name: 'Site Surveys', path: '/surveys', icon: Compass, roles: ['ADMIN', 'SALES'] },
       { name: 'Quotations', path: '/quotes', icon: FileText, roles: ['ADMIN', 'SALES'] },
       { name: 'Installation Orders', path: '/orders', icon: Layers, roles: ['ADMIN', 'SALES', 'WAREHOUSE'] },
     ],
@@ -115,7 +115,7 @@ export function Sidebar({ isOpen, onClose }) {
             onChange={(e) => switchDemoRole(e.target.value)}
             className="w-full bg-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
           >
-            <option value="ADMIN">ADMIN — Vikram Mehta</option>
+            <option value="ADMIN">ADMIN — Vikram Shah</option>
             <option value="SALES">SALES — Priya Sharma</option>
             <option value="WAREHOUSE">WAREHOUSE — Raghav Patel</option>
             <option value="TECHNICIAN">TECHNICIAN — Arjun Rao</option>

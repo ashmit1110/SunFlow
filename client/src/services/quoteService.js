@@ -6,7 +6,17 @@ import apiClient from './apiClient';
  */
 export const quoteService = {
   /**
+   * GET /api/quotes
+   * @param {{ status?: string, page?: number, pageSize?: number }} params
+   */
+  async getQuotes(params = {}) {
+    return apiClient.get('/quotes', params);
+  },
+
+  /**
    * POST /api/leads/:leadId/quotes
+   * @param {string} leadId
+   * @param {{ systemType: string, capacityKw: number, discount?: string, tax?: string, validUntil?: string }} quoteData
    */
   async createQuote(leadId, quoteData) {
     return apiClient.post(`/leads/${leadId}/quotes`, quoteData);
@@ -35,6 +45,7 @@ export const quoteService = {
 
   /**
    * POST /api/quotes/:id/accept
+   * Accepts quote and atomically creates confirmed InstallationOrder (FR-053)
    */
   async acceptQuote(id) {
     return apiClient.post(`/quotes/${id}/accept`);
