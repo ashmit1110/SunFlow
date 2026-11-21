@@ -61,15 +61,8 @@ export function EquipmentPassportPage() {
       const data = response?.data || response;
       setPassport(data);
     } catch (err) {
-      if (err.status === 404) {
-        // Backend route not yet mounted (404 Not Found on /api/equipment/...)
-        setIsBackendPending(true);
-        // Provide design preview with mockPassport but clearly watermarked with backend pending notice
-        setPassport(mockPassport);
-      } else {
-        setApiError(err.message || 'Failed to retrieve equipment passport');
-        setPassport(null);
-      }
+      setApiError(err.message || `Equipment serial "${serial}" not found in registry.`);
+      setPassport(null);
     } finally {
       setIsLoading(false);
     }

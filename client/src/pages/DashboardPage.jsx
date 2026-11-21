@@ -45,35 +45,22 @@ export function DashboardPage() {
 
         if (!isMounted) return;
 
-        let hasData = false;
-
         if (sumRes.status === 'fulfilled') {
           const sumData = sumRes.value?.data || sumRes.value;
-          if (sumData && (sumData.recordedRevenue !== undefined || sumData.outstandingBalance !== undefined)) {
+          if (sumData) {
             setSummary(sumData);
-            hasData = true;
           }
+        } else if (sumRes.reason) {
+          setApiError(sumRes.reason.message || 'Failed to load executive summary');
         }
 
         if (profRes.status === 'fulfilled') {
           const profData = profRes.value?.data || profRes.value;
           if (Array.isArray(profData)) {
             setProfitability(profData);
-            hasData = true;
           }
-        }
-
-        // If endpoints returned 404 or failed due to pending backend implementation
-        if (!hasData) {
-          setIsBackendPending(true);
-          setSummary(mockDashboardSummary);
-          setProfitability(mockProfitability);
-        }
-      } catch (err) {
-        if (isMounted) {
-          setIsBackendPending(true);
-          setSummary(mockDashboardSummary);
-          setProfitability(mockProfitability);
+        } else if (profRes.reason && !apiError) {
+          setApiError(profRes.reason.message || 'Failed to load profitability metrics');
         }
       } finally {
         if (isMounted) {

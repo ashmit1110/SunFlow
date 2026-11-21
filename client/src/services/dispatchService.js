@@ -7,9 +7,38 @@ import apiClient from './apiClient';
 export const dispatchService = {
   /**
    * GET /api/dispatches
+   * Tries /dispatches endpoint first; if not mounted, derives dispatches from /orders
    */
   async getDispatches(params = {}) {
-    return apiClient.get('/dispatches', params);
+    try {
+      return await apiClient.get('/dispatches', params);
+    } catch (err) {
+      if (err.status === 404) {
+        // Backend exposes dispatches through orders: GET /api/orders
+        const ordersRes = await apiClient.get('/orders', { pageSize: 100 });
+        const orders = ordersRes?.data || [];
+        const aggregated = [];
+        for (const o of orders) {
+          if (Array.isArray(o.dispatches)) {
+            for (const d of o.dispatches) {
+              aggregated.push({
+                ...d,
+                orderId: o.id,
+                customerName: o.customer?.name || o.quote?.customer?.name || 'Customer',
+                scheduledDate: d.dispatchDate
+                  ? new Date(d.dispatchDate).toLocaleDateString()
+                  : (o.installationRecord?.scheduledDate ? new Date(o.installationRecord.scheduledDate).toLocaleDateString() : '-'),
+                serializedCount: d.equipment?.length || 0,
+                nonSerializedItemsCount: d.items?.length || 0,
+                order: o,
+              });
+            }
+          }
+        }
+        return { data: aggregated };
+      }
+      throw err;
+    }
   },
 
   /**

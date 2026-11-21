@@ -38,13 +38,8 @@ export function DispatchPage() {
         setDispatches([]);
       }
     } catch (err) {
-      if (err.status === 404) {
-        setIsBackendPending(true);
-        setDispatches(mockDispatches);
-      } else {
-        setApiError(err.message || 'Failed to load dispatches');
-        setDispatches([]);
-      }
+      setApiError(err.message || 'Failed to load dispatches');
+      setDispatches([]);
     } finally {
       setIsLoading(false);
     }
