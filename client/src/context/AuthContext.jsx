@@ -17,7 +17,8 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem('sunflow_token') || null);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Verify current user on mount via /api/auth/me (Phase 2 requirement)
+  // Verify current user on mount via /api/auth/me
+  // Ensure valid session survives page refresh and only genuine 401/403 clears the session
   useEffect(() => {
     let isMounted = true;
 
@@ -33,18 +34,33 @@ export function AuthProvider({ children }) {
       }
 
       try {
-        const response = await authService.getMe();
-        if (isMounted && response?.data) {
-          setUser(response.data);
+        const userData = await authService.getMe();
+        // Backend returns { data: { id, name, role } } so authService.getMe() returns { id, name, role }
+        const verifiedUser = userData?.id ? userData : userData?.data;
+        if (isMounted && verifiedUser?.id) {
+          setUser(verifiedUser);
           setToken(storedToken);
-          localStorage.setItem('sunflow_user', JSON.stringify(response.data));
+          localStorage.setItem('sunflow_user', JSON.stringify(verifiedUser));
         }
       } catch (err) {
-        // If 401 unauthenticated or token expired, clean up session
-        if (isMounted) {
-          authService.logout();
-          setUser(null);
-          setToken(null);
+        // Only clear session when authentication genuinely fails (401 or 403), NOT on network or 500 errors
+        if (err.status === 401 || err.status === 403) {
+          if (isMounted) {
+            authService.logout();
+            setUser(null);
+            setToken(null);
+          }
+        } else {
+          // Network error or offline server: preserve existing stored user so session survives page refresh
+          try {
+            const cached = localStorage.getItem('sunflow_user');
+            if (cached && isMounted) {
+              setUser(JSON.parse(cached));
+              setToken(storedToken);
+            }
+          } catch {
+            // ignore JSON parse error
+          }
         }
       } finally {
         if (isMounted) {
@@ -55,7 +71,7 @@ export function AuthProvider({ children }) {
 
     verifySession();
 
-    // Listen for global 401 unauthorized events
+    // Listen for global 401 unauthorized events from apiClient
     const handleUnauthorized = () => {
       setUser(null);
       setToken(null);
@@ -71,21 +87,19 @@ export function AuthProvider({ children }) {
 
   /**
    * Log in against the real backend POST /api/auth/login
-   * @param {{ email: string, password: string }} credentials
+   * No fake demo tokens or synthetic success fallbacks
    */
   const login = async (credentials) => {
-    try {
-      const data = await authService.login(credentials);
-      if (data?.user && data?.token) {
-        setUser(data.user);
-        setToken(data.token);
-        return data;
-      }
-      throw new Error('Malformed login response from server');
-    } catch (err) {
-      // Re-throw so the login form shows the exact backend error message
-      throw err;
+    const data = await authService.login(credentials);
+    const verifiedUser = data?.user || data?.data?.user;
+    const tokenVal = data?.token || data?.data?.token;
+
+    if (verifiedUser && tokenVal) {
+      setUser(verifiedUser);
+      setToken(tokenVal);
+      return data;
     }
+    throw new Error('Invalid authentication response structure from backend');
   };
 
   /**
@@ -98,20 +112,12 @@ export function AuthProvider({ children }) {
   };
 
   /**
-   * Demo role switcher for testing / presentation
+   * Quick demo account switch that authenticates against the backend
+   * No fake demo_token generation
    */
   const switchDemoRole = async (targetRole) => {
     const matched = mockUsers.find((u) => u.role === targetRole) || mockUsers[0];
-    try {
-      // Attempt logging in as that demo user against backend with demo1234
-      await login({ email: matched.email, password: 'demo1234' });
-    } catch {
-      // Fallback if backend is not reachable
-      setUser(matched);
-      setToken(`demo_token_${matched.role}`);
-      localStorage.setItem('sunflow_user', JSON.stringify(matched));
-      localStorage.setItem('sunflow_token', `demo_token_${matched.role}`);
-    }
+    return login({ email: matched.email, password: 'demo1234' });
   };
 
   const hasRole = (allowedRoles) => {

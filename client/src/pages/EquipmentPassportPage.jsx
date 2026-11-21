@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import {
   QrCode,
   Search,
@@ -14,31 +14,101 @@ import {
   Sparkles,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
+  Info,
 } from 'lucide-react';
 import PageContainer from '../layouts/PageContainer';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
+import Loading from '../components/ui/Loading';
+import EmptyState from '../components/ui/EmptyState';
+import equipmentService from '../services/equipmentService';
 import { mockPassport } from '../services/mockData';
 
 export function EquipmentPassportPage() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const serialQuery = searchParams.get('serial') || 'INV-2026-000481';
-  const [searchInput, setSearchInput] = useState(serialQuery);
-  const [passport, setPassport] = useState(mockPassport);
+  const { serial: routeSerial } = useParams();
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+
+  const querySerial = searchParams.get('serial');
+  const activeSerial = (routeSerial || querySerial || '').trim();
+
+  const [searchInput, setSearchInput] = useState(activeSerial || 'INV-2026-000481');
+  const [passport, setPassport] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [apiError, setApiError] = useState(null);
+  const [isBackendPending, setIsBackendPending] = useState(false);
 
   useEffect(() => {
-    if (serialQuery) {
-      setSearchInput(serialQuery);
-      // In full build, calls equipmentService.getEquipmentPassport(serialQuery)
-      setPassport(mockPassport);
+    if (activeSerial) {
+      setSearchInput(activeSerial);
+      fetchPassport(activeSerial);
+    } else {
+      setPassport(null);
+      setApiError(null);
+      setIsBackendPending(false);
     }
-  }, [serialQuery]);
+  }, [activeSerial]);
+
+  const fetchPassport = async (serial) => {
+    setIsLoading(true);
+    setApiError(null);
+    setIsBackendPending(false);
+
+    try {
+      const response = await equipmentService.getEquipmentPassport(serial);
+      const data = response?.data || response;
+      setPassport(data);
+    } catch (err) {
+      if (err.status === 404) {
+        // Backend route not yet mounted (404 Not Found on /api/equipment/...)
+        setIsBackendPending(true);
+        // Provide design preview with mockPassport but clearly watermarked with backend pending notice
+        setPassport(mockPassport);
+      } else {
+        setApiError(err.message || 'Failed to retrieve equipment passport');
+        setPassport(null);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSearch = (e) => {
     e.preventDefault();
     if (searchInput.trim()) {
-      setSearchParams({ serial: searchInput.trim() });
+      navigate(`/equipment/${encodeURIComponent(searchInput.trim())}/passport`);
+    }
+  };
+
+  // Dynamically render warranty status according to FR-083
+  const renderWarrantyVerdict = (status) => {
+    switch (status) {
+      case 'ACTIVE':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 mt-1">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Under Active Warranty
+          </span>
+        );
+      case 'EXPIRED':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 mt-1">
+            <Clock className="w-4 h-4 text-amber-500" /> Warranty Expired
+          </span>
+        );
+      case 'VOID':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-700 mt-1">
+            <AlertCircle className="w-4 h-4 text-rose-500" /> Warranty Voided
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-700 mt-1">
+            <AlertCircle className="w-4 h-4 text-slate-400" /> {status || 'Unregistered'}
+          </span>
+        );
     }
   };
 
@@ -58,7 +128,7 @@ export function EquipmentPassportPage() {
               Instant Equipment Identity & Warranty Verification
             </h3>
             <p className="mt-1 text-xs text-slate-300 leading-relaxed">
-              Query any serialized inverter, battery, or charge controller to inspect customer ownership, installation evidence, live warranty status, and post-installation service logs.
+              Query any serialized inverter, battery, or charge controller to inspect customer ownership, installation evidence, live deterministic warranty status, and post-installation service logs.
             </p>
 
             <form onSubmit={handleSearch} className="mt-5 flex gap-2">
@@ -80,8 +150,42 @@ export function EquipmentPassportPage() {
         </CardContent>
       </Card>
 
+      {/* Backend Integration Pending Notice */}
+      {isBackendPending && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3">
+          <Info className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-amber-900 leading-relaxed">
+            <strong>Backend Integration Notice:</strong> The Equipment Passport API endpoint (<code>GET /api/equipment/:serial/passport</code>) is pending deployment on the backend. Displaying layout preview for serial <code>{activeSerial}</code>. Live deterministic database verification will connect automatically once the backend route is active.
+          </div>
+        </div>
+      )}
+
+      {/* API Error Callout */}
+      {apiError && (
+        <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+          <div className="text-xs text-rose-800">
+            <strong>Error:</strong> {apiError}
+          </div>
+        </div>
+      )}
+
+      {/* Loading State */}
+      {isLoading && (
+        <Loading message="Querying live equipment passport and computing deterministic warranty..." />
+      )}
+
+      {/* Empty State when no serial queried */}
+      {!isLoading && !passport && !apiError && (
+        <EmptyState
+          icon={QrCode}
+          title="No Equipment Serial Selected"
+          description="Enter an equipment serial number above (e.g. INV-2026-000481) to view its full lifecycle passport and live warranty status."
+        />
+      )}
+
       {/* Passport Record Card */}
-      {passport && (
+      {!isLoading && passport && (
         <div className="space-y-6">
           {/* Top Summary Bar */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -94,7 +198,10 @@ export function EquipmentPassportPage() {
                   <h3 className="text-lg font-bold text-slate-900 font-mono">
                     {passport.serialNumber}
                   </h3>
-                  <Badge status={passport.warranty.status} label={`Warranty: ${passport.warranty.status}`} />
+                  <Badge
+                    status={passport.warranty?.status || 'UNKNOWN'}
+                    label={`Warranty: ${passport.warranty?.status || 'UNKNOWN'}`}
+                  />
                   <Badge status={passport.status} />
                 </div>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -107,11 +214,13 @@ export function EquipmentPassportPage() {
               <div className="text-left md:text-right">
                 <span className="text-[11px] text-slate-400 block font-medium">Warranty Expiry Date</span>
                 <span className="text-sm font-bold text-slate-900">
-                  {new Date(passport.warranty.expiryDate).toLocaleDateString('en-IN', {
-                    day: 'numeric',
-                    month: 'short',
-                    year: 'numeric',
-                  })}
+                  {passport.warranty?.expiryDate
+                    ? new Date(passport.warranty.expiryDate).toLocaleDateString('en-IN', {
+                        day: 'numeric',
+                        month: 'short',
+                        year: 'numeric',
+                      })
+                    : 'N/A'}
                 </span>
               </div>
             </div>
@@ -131,26 +240,26 @@ export function EquipmentPassportPage() {
                 <div>
                   <span className="text-xs text-slate-400 block">Customer Name</span>
                   <span className="text-sm font-semibold text-slate-900">
-                    {passport.customer.name}
+                    {passport.customer?.name || 'N/A'}
                   </span>
                 </div>
                 <div>
                   <span className="text-xs text-slate-400 block">Phone</span>
                   <span className="text-xs font-mono text-slate-700 flex items-center gap-1">
-                    <Phone className="w-3 h-3 text-slate-400" /> {passport.customer.phone}
+                    <Phone className="w-3 h-3 text-slate-400" /> {passport.customer?.phone || 'N/A'}
                   </span>
                 </div>
                 <div>
                   <span className="text-xs text-slate-400 block">Installation Address</span>
                   <span className="text-xs text-slate-600 flex items-start gap-1">
                     <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                    {passport.customer.address}
+                    {passport.customer?.address || 'Site Address Recorded on Order'}
                   </span>
                 </div>
                 <div className="pt-2 border-t border-slate-100">
                   <span className="text-xs text-slate-400 block">Installation Order</span>
                   <span className="font-mono text-xs font-semibold text-amber-600">
-                    {passport.installationOrderId}
+                    {passport.installationOrderId || 'N/A'}
                   </span>
                 </div>
               </CardContent>
@@ -167,20 +276,22 @@ export function EquipmentPassportPage() {
               <CardContent className="space-y-3 pt-0">
                 <div>
                   <span className="text-xs text-slate-400 block">Coverage Status (Computed Live)</span>
-                  <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 mt-1">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-500" /> Under Active Warranty
-                  </span>
+                  {renderWarrantyVerdict(passport.warranty?.status)}
                 </div>
                 <div>
                   <span className="text-xs text-slate-400 block">Start Date (Delivery / Completion)</span>
                   <span className="text-xs font-medium text-slate-700">
-                    {new Date(passport.warranty.startDate).toLocaleDateString()}
+                    {passport.warranty?.startDate
+                      ? new Date(passport.warranty.startDate).toLocaleDateString()
+                      : 'N/A'}
                   </span>
                 </div>
                 <div>
                   <span className="text-xs text-slate-400 block">Expiry Date</span>
                   <span className="text-xs font-medium text-slate-700">
-                    {new Date(passport.warranty.expiryDate).toLocaleDateString()}
+                    {passport.warranty?.expiryDate
+                      ? new Date(passport.warranty.expiryDate).toLocaleDateString()
+                      : 'N/A'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-100">
@@ -199,7 +310,7 @@ export function EquipmentPassportPage() {
               </CardHeader>
               <CardContent className="space-y-3 pt-0">
                 <div className="grid grid-cols-2 gap-2">
-                  {passport.photos.map((photo, idx) => (
+                  {(passport.photos || []).map((photo, idx) => (
                     <div
                       key={idx}
                       className="border border-slate-200 rounded-lg p-2 bg-slate-50 text-center"
@@ -212,6 +323,11 @@ export function EquipmentPassportPage() {
                       </p>
                     </div>
                   ))}
+                  {(!passport.photos || passport.photos.length === 0) && (
+                    <p className="text-xs text-slate-400 col-span-2 py-4 text-center">
+                      No installation photos uploaded yet.
+                    </p>
+                  )}
                 </div>
                 <p className="text-[11px] text-slate-500 pt-1">
                   Photos uploaded by technician upon job completion (FR-092).
@@ -230,7 +346,7 @@ export function EquipmentPassportPage() {
             </CardHeader>
             <CardContent className="p-0">
               <div className="divide-y divide-slate-100">
-                {passport.serviceHistory.map((item) => (
+                {(passport.serviceHistory || []).map((item) => (
                   <div key={item.ticketNumber} className="p-4 flex items-center justify-between gap-4">
                     <div>
                       <div className="flex items-center gap-2">
@@ -251,6 +367,11 @@ export function EquipmentPassportPage() {
                     </span>
                   </div>
                 ))}
+                {(!passport.serviceHistory || passport.serviceHistory.length === 0) && (
+                  <div className="p-6 text-center text-xs text-slate-400">
+                    No post-installation service tickets filed for this serial.
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -30,7 +30,7 @@ const navigationGroups = [
       { name: 'Dashboard', path: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN'] },
       { name: 'Leads Pipeline', path: '/leads', icon: UserCheck, roles: ['ADMIN', 'SALES'] },
       { name: 'Customers', path: '/customers', icon: Users, roles: ['ADMIN', 'SALES', 'SUPPORT'] },
-      { name: 'Site Surveys', path: '/surveys', icon: Compass, roles: ['ADMIN', 'SALES', 'TECHNICIAN'] },
+      { name: 'Site Surveys', path: '/surveys', icon: Compass, roles: ['ADMIN', 'SALES'] },
       { name: 'Quotations', path: '/quotes', icon: FileText, roles: ['ADMIN', 'SALES'] },
       { name: 'Installation Orders', path: '/orders', icon: Layers, roles: ['ADMIN', 'SALES', 'WAREHOUSE'] },
     ],

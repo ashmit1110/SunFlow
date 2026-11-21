@@ -62,11 +62,11 @@ export function App() {
               }
             />
 
-            {/* Site Surveys: ADMIN, SALES, TECHNICIAN */}
+            {/* Site Surveys: ADMIN, SALES */}
             <Route
               path="/surveys"
               element={
-                <ProtectedRoute allowedRoles={['ADMIN', 'SALES', 'TECHNICIAN']}>
+                <ProtectedRoute allowedRoles={['ADMIN', 'SALES']}>
                   <SurveysPage />
                 </ProtectedRoute>
               }

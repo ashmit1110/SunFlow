@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { Boxes, Plus, AlertCircle, CheckCircle2, ArrowDownRight, ArrowUpRight, History } from 'lucide-react';
+import { Boxes, Plus, AlertCircle, CheckCircle2 } from 'lucide-react';
 import PageContainer from '../layouts/PageContainer';
 import {
   Table,
@@ -17,7 +17,13 @@ import { TableSkeleton } from '../components/ui/Loading';
 import EmptyState from '../components/ui/EmptyState';
 import { useAuth } from '../hooks/useAuth';
 import productService from '../services/productService';
-import { mockInventory } from '../services/mockData';
+
+// Helpers to safely extract fields from nested `{ productId, quantityOnHand, reorderLevel, product: { name, sku, category, unit } }`
+const getProductName = (item) => item?.product?.name || item?.name || 'Unnamed Product';
+const getProductSku = (item) => item?.product?.sku || item?.sku || item?.productId || '';
+const getProductCategory = (item) => item?.product?.category || item?.category || 'BULK_ITEM';
+const getProductUnit = (item) => item?.product?.unit || item?.unit || 'units';
+const getReorderLevel = (item) => (typeof item?.reorderLevel === 'number' ? item.reorderLevel : (typeof item?.reorderThreshold === 'number' ? item.reorderThreshold : 10));
 
 export function InventoryPage() {
   const { role } = useAuth();
@@ -39,7 +45,7 @@ export function InventoryPage() {
     type: 'INBOUND',
     quantity: 10,
     referenceType: 'GOODS_RECEIPT',
-    notes: 'PO-2026-001',
+    notes: '',
   });
 
   const fetchInventory = useCallback(async () => {
@@ -47,9 +53,12 @@ export function InventoryPage() {
     setApiError(null);
     try {
       const res = await productService.getInventory();
-      setInventory(res.data && res.data.length > 0 ? res.data : mockInventory);
-    } catch {
-      setInventory(mockInventory);
+      // Handle both { data: [...] } and bare array response
+      const items = Array.isArray(res) ? res : (res?.data || []);
+      setInventory(items);
+    } catch (err) {
+      setApiError(err.message || 'Unable to load inventory levels from backend.');
+      setInventory([]);
     } finally {
       setIsLoading(false);
     }
@@ -62,12 +71,13 @@ export function InventoryPage() {
   const handleOpenAdjust = (item) => {
     setSelectedItem(item);
     setAdjustForm({
-      productId: item.productId,
+      productId: item?.productId || item?.id || '',
       type: 'INBOUND',
       quantity: 10,
       referenceType: 'GOODS_RECEIPT',
-      notes: 'PO-2026-001',
+      notes: '',
     });
+    setApiError(null);
     setIsAdjustModalOpen(true);
   };
 
@@ -81,54 +91,43 @@ export function InventoryPage() {
       await productService.adjustInventory(adjustForm.productId, {
         type: adjustForm.type,
         quantity: Number(adjustForm.quantity),
-        referenceType: adjustForm.referenceType,
-        notes: adjustForm.notes,
+        referenceType: adjustForm.referenceType || 'ADJUSTMENT',
+        notes: adjustForm.notes || undefined,
       });
       setIsAdjustModalOpen(false);
-      setSuccessBanner('Stock level adjusted and ledger movement row recorded (FR-032).');
+      setSuccessBanner('Stock level successfully updated in database (FR-032).');
       setTimeout(() => setSuccessBanner(null), 4000);
       fetchInventory();
-    } catch {
-      // Local state update fallback
-      setInventory((prev) =>
-        prev.map((item) => {
-          if (item.productId === adjustForm.productId) {
-            const delta =
-              adjustForm.type === 'INBOUND'
-                ? Number(adjustForm.quantity)
-                : -Number(adjustForm.quantity);
-            return { ...item, quantityOnHand: Math.max(0, item.quantityOnHand + delta) };
-          }
-          return item;
-        })
-      );
-      setIsAdjustModalOpen(false);
-      setSuccessBanner('Stock level adjusted locally (immutable ledger movement logged).');
-      setTimeout(() => setSuccessBanner(null), 4000);
+    } catch (err) {
+      // Display actual API error. Never fake local mutations.
+      setApiError(err.message || 'Failed to adjust stock. Insufficient quantity or invalid request.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const filtered = inventory.filter(
-    (i) =>
-      i.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      i.sku.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Safe search filter preventing .toLowerCase() crashes on undefined fields
+  const filtered = inventory.filter((i) => {
+    if (!searchTerm.trim()) return true;
+    const term = searchTerm.toLowerCase();
+    const name = getProductName(i).toLowerCase();
+    const sku = getProductSku(i).toLowerCase();
+    return name.includes(term) || sku.includes(term);
+  });
 
   return (
     <PageContainer
       title="Inventory Levels & Stock Movements"
-      subtitle="Quantity-on-hand tracking for bulk components with immutable audit ledgers (FR-031 / FR-032)"
+      subtitle="Quantity-on-hand tracking for bulk non-serialized components with immutable ledger movements (FR-031 / FR-032)"
       actions={
-        canModify && (
+        canModify && inventory.length > 0 && (
           <Button
             variant="primary"
             size="sm"
-            onClick={() => handleOpenAdjust(inventory[0] || { productId: 'prod_panel' })}
+            onClick={() => handleOpenAdjust(inventory[0])}
             leftIcon={<Plus className="w-4 h-4" />}
           >
-            Adjust Stock Level
+            Adjust Stock
           </Button>
         )
       }
@@ -141,7 +140,7 @@ export function InventoryPage() {
       )}
 
       {apiError && (
-        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center justify-between gap-3">
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{apiError}</span>
@@ -157,8 +156,11 @@ export function InventoryPage() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           onClear={() => setSearchTerm('')}
-          placeholder="Search by SKU or item name..."
+          placeholder="Search by SKU or component name..."
         />
+        <div className="text-xs text-slate-500">
+          Total items: <strong className="text-slate-800">{inventory.length}</strong>
+        </div>
       </div>
 
       {isLoading ? (
@@ -166,8 +168,12 @@ export function InventoryPage() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={Boxes}
-          title="No stock records found"
-          description="Adjust your search query or perform a goods receipt."
+          title="No inventory records available"
+          description={
+            searchTerm
+              ? `No inventory items matched "${searchTerm}".`
+              : 'Inventory tracking shows quantity-on-hand for non-serialized components once goods receipts are processed.'
+          }
         />
       ) : (
         <Table>
@@ -183,24 +189,31 @@ export function InventoryPage() {
           </TableHeader>
           <TableBody>
             {filtered.map((item) => {
-              const isLow = item.quantityOnHand <= (item.reorderThreshold || 10);
+              const name = getProductName(item);
+              const sku = getProductSku(item);
+              const category = getProductCategory(item);
+              const unit = getProductUnit(item);
+              const threshold = getReorderLevel(item);
+              const isLow = (item.quantityOnHand ?? 0) <= threshold;
+              const prodId = item.productId || item.id;
+
               return (
-                <TableRow key={item.productId}>
+                <TableRow key={prodId}>
                   <TableCell>
-                    <div className="font-semibold text-slate-900">{item.name}</div>
-                    <div className="font-mono text-xs text-slate-400">{item.sku}</div>
+                    <div className="font-semibold text-slate-900">{name}</div>
+                    <div className="font-mono text-xs text-slate-400">{sku}</div>
                   </TableCell>
                   <TableCell className="text-xs font-medium text-slate-600">
-                    {item.category}
+                    {category}
                   </TableCell>
                   <TableCell>
                     <span className="font-mono font-bold text-sm text-slate-900">
-                      {item.quantityOnHand}
+                      {item.quantityOnHand ?? 0}
                     </span>{' '}
-                    <span className="text-xs text-slate-500">{item.unit || 'units'}</span>
+                    <span className="text-xs text-slate-500">{unit}</span>
                   </TableCell>
                   <TableCell className="text-xs text-slate-500 font-mono">
-                    {item.reorderThreshold || 10} {item.unit || 'units'}
+                    {threshold} {unit}
                   </TableCell>
                   <TableCell>
                     {isLow ? (
@@ -237,14 +250,24 @@ export function InventoryPage() {
         isOpen={isAdjustModalOpen}
         onClose={() => !isSubmitting && setIsAdjustModalOpen(false)}
         title="Adjust Non-Serialized Stock (FR-032)"
-        description="Records an immutable StockMovement row (inbound, outbound, adjustment) to prevent arbitrary stock overrides."
+        description="Records an immutable StockMovement row (inbound, outbound, adjustment) to update quantity-on-hand."
         footer={
           <>
-            <Button variant="ghost" size="sm" onClick={() => setIsAdjustModalOpen(false)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => setIsAdjustModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" isLoading={isSubmitting} onClick={handleAdjustStock}>
-              Commit Stock Movement
+            <Button
+              variant="primary"
+              size="sm"
+              isLoading={isSubmitting}
+              onClick={handleAdjustStock}
+            >
+              Commit Adjustment
             </Button>
           </>
         }
@@ -256,11 +279,17 @@ export function InventoryPage() {
             onChange={(e) => setAdjustForm({ ...adjustForm, productId: e.target.value })}
             required
           >
-            {inventory.map((i) => (
-              <option key={i.productId} value={i.productId}>
-                {i.name} ({i.sku}) — Current: {i.quantityOnHand} {i.unit}
-              </option>
-            ))}
+            {inventory.map((i) => {
+              const pId = i.productId || i.id;
+              const name = getProductName(i);
+              const sku = getProductSku(i);
+              const unit = getProductUnit(i);
+              return (
+                <option key={pId} value={pId}>
+                  {name} ({sku}) — In Stock: {i.quantityOnHand ?? 0} {unit}
+                </option>
+              );
+            })}
           </Select>
 
           <div className="grid grid-cols-2 gap-3">
@@ -270,7 +299,7 @@ export function InventoryPage() {
               onChange={(e) => setAdjustForm({ ...adjustForm, type: e.target.value })}
             >
               <option value="INBOUND">INBOUND (Goods Receipt)</option>
-              <option value="OUTBOUND">OUTBOUND (Scrap / Transfer)</option>
+              <option value="OUTBOUND">OUTBOUND (Dispatch / Scrap)</option>
               <option value="ADJUSTMENT">ADJUSTMENT (Cycle Count)</option>
             </Select>
 
@@ -293,7 +322,7 @@ export function InventoryPage() {
             />
             <Input
               label="Audit Notes"
-              placeholder="e.g. Physical stock count check"
+              placeholder="e.g. Verified goods receipt note"
               value={adjustForm.notes}
               onChange={(e) => setAdjustForm({ ...adjustForm, notes: e.target.value })}
             />

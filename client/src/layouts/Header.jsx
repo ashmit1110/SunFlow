@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Menu, Search, Bell, Sun, Sparkles } from 'lucide-react';
+import { Menu, Search, Bell, Sun } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import Badge from '../components/ui/Badge';
 
 export function Header({ onMenuClick }) {
-  const { user, role, switchDemoRole } = useAuth();
+  const { user, role } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [quickSerial, setQuickSerial] = useState('');
@@ -69,28 +69,6 @@ export function Header({ onMenuClick }) {
           />
           <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
         </form>
-
-        {/* Demo Role Switcher quick buttons for Hackathon Judges */}
-        <div className="hidden xl:flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-          <span className="text-[10px] font-bold text-slate-500 px-2 uppercase tracking-wider flex items-center gap-1">
-            <Sparkles className="w-3 h-3 text-amber-500" />
-            Switch:
-          </span>
-          {['ADMIN', 'SALES', 'WAREHOUSE', 'TECHNICIAN', 'SUPPORT'].map((r) => (
-            <button
-              key={r}
-              type="button"
-              onClick={() => switchDemoRole(r)}
-              className={`text-[10px] px-2 py-0.5 rounded font-semibold transition-all ${
-                role === r
-                  ? 'bg-amber-500 text-slate-950 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200'
-              }`}
-            >
-              {r}
-            </button>
-          ))}
-        </div>
 
         {/* Role Pill */}
         <div className="flex items-center gap-2">

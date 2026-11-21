@@ -66,3 +66,5 @@ export function TableSkeleton({ rows = 5, cols = 5 }) {
     </div>
   );
 }
+
+export default LoadingOverlay;

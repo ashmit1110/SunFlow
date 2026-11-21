@@ -18,7 +18,6 @@ import { TableSkeleton } from '../components/ui/Loading';
 import EmptyState from '../components/ui/EmptyState';
 import { useAuth } from '../hooks/useAuth';
 import productService from '../services/productService';
-import { mockProducts } from '../services/mockData';
 
 export function ProductsPage() {
   const { role } = useAuth();
@@ -56,10 +55,11 @@ export function ProductsPage() {
       const res = await productService.getProducts({
         category: categoryFilter || undefined,
       });
-      setProducts(res.data && res.data.length > 0 ? res.data : mockProducts);
-    } catch {
-      // Graceful fallback to rich mock data if backend catalogue endpoint is pending
-      setProducts(mockProducts);
+      const items = Array.isArray(res) ? res : (res?.data || []);
+      setProducts(items);
+    } catch (err) {
+      setApiError(err.message || 'Catalogue API unavailable or error loading products.');
+      setProducts([]);
     } finally {
       setIsLoading(false);
     }
@@ -71,8 +71,8 @@ export function ProductsPage() {
 
   const validateForm = () => {
     const errors = {};
-    if (!productForm.sku.trim()) errors.sku = 'SKU is required';
-    if (!productForm.name.trim()) errors.name = 'Product name is required';
+    if (!productForm.sku?.trim()) errors.sku = 'SKU is required';
+    if (!productForm.name?.trim()) errors.name = 'Product name is required';
     if (!productForm.unitPrice || Number(productForm.unitPrice) <= 0) {
       errors.unitPrice = 'Valid unit price is required';
     }
@@ -88,28 +88,25 @@ export function ProductsPage() {
     if (!validateForm() || isSubmitting) return;
 
     setIsSubmitting(true);
+    setApiError(null);
     try {
       await productService.createProduct({
-        ...productForm,
+        sku: productForm.sku.trim(),
+        name: productForm.name.trim(),
+        category: productForm.category,
+        isSerialized: Boolean(productForm.isSerialized),
         unitPrice: String(Number(productForm.unitPrice).toFixed(2)),
+        unit: productForm.unit.trim() || 'piece',
         warrantyMonths: Number(productForm.warrantyMonths),
       });
       setIsAddModalOpen(false);
-      setSuccessBanner('New product catalogue entry created.');
+      setSuccessBanner('New product catalogue entry created successfully.');
       setTimeout(() => setSuccessBanner(null), 4000);
       fetchProducts();
-    } catch {
-      // Offline fallback for preview
-      const newEntry = {
-        id: `prod_${Date.now()}`,
-        ...productForm,
-        unitPrice: String(Number(productForm.unitPrice).toFixed(2)),
-        warrantyMonths: Number(productForm.warrantyMonths),
-      };
-      setProducts((prev) => [newEntry, ...prev]);
-      setIsAddModalOpen(false);
-      setSuccessBanner('Product created (local catalogue).');
-      setTimeout(() => setSuccessBanner(null), 4000);
+    } catch (err) {
+      // Show actual API error. Never fake local product creation on failure.
+      if (err.fields) setFormErrors(err.fields);
+      setApiError(err.message || 'Failed to create product in catalogue');
     } finally {
       setIsSubmitting(false);
     }
@@ -118,13 +115,13 @@ export function ProductsPage() {
   const handleOpenEdit = (p) => {
     setSelectedProduct(p);
     setProductForm({
-      sku: p.sku,
-      name: p.name,
-      category: p.category,
-      isSerialized: p.isSerialized,
-      unitPrice: p.unitPrice,
-      unit: p.unit,
-      warrantyMonths: p.warrantyMonths,
+      sku: p.sku || '',
+      name: p.name || '',
+      category: p.category || 'INVERTER',
+      isSerialized: Boolean(p.isSerialized),
+      unitPrice: p.unitPrice || '',
+      unit: p.unit || 'piece',
+      warrantyMonths: p.warrantyMonths ?? 24,
     });
     setFormErrors({});
     setIsEditModalOpen(true);
@@ -135,36 +132,31 @@ export function ProductsPage() {
     if (!validateForm() || isSubmitting) return;
 
     setIsSubmitting(true);
+    setApiError(null);
     try {
       await productService.updateProduct(selectedProduct.id, {
-        name: productForm.name,
+        name: productForm.name.trim(),
         unitPrice: String(Number(productForm.unitPrice).toFixed(2)),
         warrantyMonths: Number(productForm.warrantyMonths),
       });
       setIsEditModalOpen(false);
-      setSuccessBanner('Product catalogue entry updated.');
+      setSuccessBanner('Product catalogue entry updated successfully.');
       setTimeout(() => setSuccessBanner(null), 4000);
       fetchProducts();
-    } catch {
-      setProducts((prev) =>
-        prev.map((item) =>
-          item.id === selectedProduct.id
-            ? { ...item, ...productForm, unitPrice: String(Number(productForm.unitPrice).toFixed(2)) }
-            : item
-        )
-      );
-      setIsEditModalOpen(false);
-      setSuccessBanner('Product updated (local catalogue).');
-      setTimeout(() => setSuccessBanner(null), 4000);
+    } catch (err) {
+      // Show actual API error. Never fake local mutations on failure.
+      if (err.fields) setFormErrors(err.fields);
+      setApiError(err.message || 'Failed to update product');
     } finally {
       setIsSubmitting(false);
     }
   };
 
   const filtered = products.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.sku.toLowerCase().includes(searchTerm.toLowerCase());
+    const name = (p.name || '').toLowerCase();
+    const sku = (p.sku || '').toLowerCase();
+    const term = searchTerm.toLowerCase();
+    const matchesSearch = !term || name.includes(term) || sku.includes(term);
     const matchesCategory = !categoryFilter || p.category === categoryFilter;
     return matchesSearch && matchesCategory;
   });
@@ -172,7 +164,7 @@ export function ProductsPage() {
   return (
     <PageContainer
       title="Product Catalogue"
-      subtitle="Configurable solar catalogue, serialization tracking flags, and warranty durations (FR-030)"
+      subtitle="Configurable solar equipment catalogue, serial tracking flags, and warranty durations (FR-030)"
       actions={
         canModify && (
           <Button
@@ -206,7 +198,7 @@ export function ProductsPage() {
       )}
 
       {apiError && (
-        <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center justify-between gap-3">
+        <div className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
             <span>{apiError}</span>
@@ -237,6 +229,7 @@ export function ProductsPage() {
           <option value="WIRE">Wires & Cables</option>
           <option value="EARTHING">Earthing</option>
           <option value="STAND">Mounting Stands</option>
+          <option value="WIRING_BOX">Wiring Boxes</option>
         </Select>
       </div>
 
@@ -246,7 +239,25 @@ export function ProductsPage() {
         <EmptyState
           icon={Package}
           title="No products found"
-          description="Try adjusting your filter or add a new catalogue item."
+          description={
+            searchTerm || categoryFilter
+              ? 'No products matched your search filters.'
+              : 'Product catalogue items will appear here once configured.'
+          }
+          actionLabel={canModify ? 'Add First Product' : undefined}
+          onAction={() => {
+            setProductForm({
+              sku: '',
+              name: '',
+              category: 'INVERTER',
+              isSerialized: true,
+              unitPrice: '',
+              unit: 'piece',
+              warrantyMonths: 24,
+            });
+            setFormErrors({});
+            setIsAddModalOpen(true);
+          }}
         />
       ) : (
         <Table>
@@ -284,13 +295,13 @@ export function ProductsPage() {
                   )}
                 </TableCell>
                 <TableCell className="font-mono text-xs font-semibold text-slate-900">
-                  ₹{parseFloat(p.unitPrice).toLocaleString('en-IN')} / {p.unit}
+                  ₹{parseFloat(p.unitPrice || '0').toLocaleString('en-IN')} / {p.unit || 'piece'}
                 </TableCell>
                 <TableCell className="text-xs font-medium text-slate-700">
-                  {p.warrantyMonths} months ({Number(p.warrantyMonths / 12).toFixed(1)} yrs)
+                  {p.warrantyMonths ?? 0} months
                 </TableCell>
                 <TableCell className="text-right">
-                  {canModify && (
+                  {canModify && p.id && (
                     <Button
                       variant="outline"
                       size="xs"
@@ -312,13 +323,23 @@ export function ProductsPage() {
         isOpen={isAddModalOpen}
         onClose={() => !isSubmitting && setIsAddModalOpen(false)}
         title="Add Catalogue Item (FR-030)"
-        description="Define product pricing, warranty duration, and serialization mode."
+        description="Define product pricing, warranty duration, and serialization mode in catalogue."
         footer={
           <>
-            <Button variant="ghost" size="sm" onClick={() => setIsAddModalOpen(false)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => setIsAddModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" isLoading={isSubmitting} onClick={handleAddProduct}>
+            <Button
+              variant="primary"
+              size="sm"
+              isLoading={isSubmitting}
+              onClick={handleAddProduct}
+            >
               Save to Catalogue
             </Button>
           </>
@@ -391,7 +412,7 @@ export function ProductsPage() {
               onChange={(e) => setProductForm({ ...productForm, isSerialized: e.target.checked })}
               className="rounded text-amber-500 focus:ring-amber-500"
             />
-            <span>This is a high-value serialized unit (tracked via Equipment Passport)</span>
+            <span>This is a high-value serialized unit (tracked via unique serial numbers)</span>
           </label>
         </form>
       </Modal>
@@ -401,23 +422,54 @@ export function ProductsPage() {
         isOpen={isEditModalOpen}
         onClose={() => !isSubmitting && setIsEditModalOpen(false)}
         title="Edit Catalogue Item"
-        description="Update pricing and warranty terms."
+        description="Update catalogue unit price and warranty duration."
         footer={
           <>
-            <Button variant="ghost" size="sm" onClick={() => setIsEditModalOpen(false)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={isSubmitting}
+              onClick={() => setIsEditModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" isLoading={isSubmitting} onClick={handleEditProduct}>
+            <Button
+              variant="primary"
+              size="sm"
+              isLoading={isSubmitting}
+              onClick={handleEditProduct}
+            >
               Save Changes
             </Button>
           </>
         }
       >
         <form onSubmit={handleEditProduct} className="space-y-4">
-          <Input label="Product Name" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} required />
+          <Input
+            label="Product Name"
+            value={productForm.name}
+            onChange={(e) => setProductForm({ ...productForm, name: e.target.value })}
+            error={formErrors.name}
+            required
+          />
           <div className="grid grid-cols-2 gap-3">
-            <Input label="Unit Price (₹ INR)" type="number" step="50" value={productForm.unitPrice} onChange={(e) => setProductForm({ ...productForm, unitPrice: e.target.value })} required />
-            <Input label="Default Warranty (Months)" type="number" value={productForm.warrantyMonths} onChange={(e) => setProductForm({ ...productForm, warrantyMonths: e.target.value })} required />
+            <Input
+              label="Unit Price (₹ INR)"
+              type="number"
+              step="50"
+              value={productForm.unitPrice}
+              onChange={(e) => setProductForm({ ...productForm, unitPrice: e.target.value })}
+              error={formErrors.unitPrice}
+              required
+            />
+            <Input
+              label="Default Warranty (Months)"
+              type="number"
+              value={productForm.warrantyMonths}
+              onChange={(e) => setProductForm({ ...productForm, warrantyMonths: e.target.value })}
+              error={formErrors.warrantyMonths}
+              required
+            />
           </div>
         </form>
       </Modal>
