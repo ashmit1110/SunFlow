@@ -33,7 +33,6 @@ export async function createLead(input) {
         source: input.source,
         assignedSalesUserId: input.assignedSalesUserId,
       },
-      include: { customer: true },
     });
 
     return { lead, customer };
@@ -77,9 +76,10 @@ export async function qualifyLead(id, input) {
       gridSuitable: input.gridSuitable ?? current.gridSuitable,
     };
     const isQualified = Object.values(values).every((value) => value !== null);
+    const shouldAdvanceToQualified = isQualified && [LeadStatus.NEW, LeadStatus.CONTACTED].includes(current.status);
     return tx.lead.update({
       where: { id },
-      data: { ...values, ...(isQualified ? { status: LeadStatus.QUALIFIED } : {}) },
+      data: { ...values, ...(shouldAdvanceToQualified ? { status: LeadStatus.QUALIFIED } : {}) },
       include: { customer: true, survey: true },
     });
   });

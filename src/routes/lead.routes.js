@@ -7,10 +7,10 @@ import { authorize } from '../middleware/authorize.js';
 import { paginationSchema } from '../utils/pagination.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { validate } from '../utils/validate.js';
+import { phoneSchema } from '../utils/phoneSchema.js';
 
 const router = Router();
 const idSchema = z.object({ id: z.string().min(1) });
-const phoneSchema = z.string().trim().regex(/^\+?[0-9][0-9 ()-]{5,18}[0-9]$/, 'customerPhone must contain 7–15 digits');
 const createSchema = z.object({
   customerName: z.string().trim().min(1),
   customerPhone: phoneSchema,
