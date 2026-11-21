@@ -115,7 +115,7 @@ export function Sidebar({ isOpen, onClose }) {
             onChange={(e) => switchDemoRole(e.target.value)}
             className="w-full bg-slate-800 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 border border-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-500"
           >
-            <option value="ADMIN">ADMIN — Vikram Mehta</option>
+            <option value="ADMIN">ADMIN — Vikram Shah</option>
             <option value="SALES">SALES — Priya Sharma</option>
             <option value="WAREHOUSE">WAREHOUSE — Raghav Patel</option>
             <option value="TECHNICIAN">TECHNICIAN — Arjun Rao</option>

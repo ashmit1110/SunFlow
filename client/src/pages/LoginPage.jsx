@@ -7,7 +7,7 @@ import { Input } from '../components/ui/Input';
 import { mockUsers } from '../services/mockData';
 
 export function LoginPage() {
-  const [email, setEmail] = useState('vikram@sunpower.demo');
+  const [email, setEmail] = useState('admin@sunpower.demo');
   const [password, setPassword] = useState('demo1234');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -32,12 +32,19 @@ export function LoginPage() {
     }
   };
 
-  const handleQuickDemoLogin = (user) => {
+  const handleQuickDemoLogin = async (user) => {
     setEmail(user.email);
     setPassword('demo1234');
-    login({ email: user.email, password: 'demo1234' }).then(() => {
+    setError('');
+    setIsLoading(true);
+    try {
+      await login({ email: user.email, password: 'demo1234' });
       navigate('/dashboard', { replace: true });
-    });
+    } catch (err) {
+      setError(err.message || 'Login failed.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (

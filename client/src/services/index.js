@@ -1,5 +1,6 @@
 export { default as apiClient, ApiError } from './apiClient';
 export { default as authService } from './authService';
+export { default as customerService } from './customerService';
 export { default as leadService } from './leadService';
 export { default as surveyService } from './surveyService';
 export { default as productService } from './productService';

@@ -2,11 +2,20 @@ import React from 'react';
 import { Navigate, useLocation, Link } from 'react-router-dom';
 import { ShieldAlert, ArrowLeft, RefreshCw } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
-import Button from '../components/ui/Button';
+import Button from './ui/Button';
+import { LoadingOverlay } from './ui/Loading';
 
 export function ProtectedRoute({ children, allowedRoles }) {
-  const { user, role, isAuthenticated, switchDemoRole } = useAuth();
+  const { user, role, isAuthenticated, isInitializing, switchDemoRole } = useAuth();
   const location = useLocation();
+
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <LoadingOverlay message="Authenticating session..." />
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <Navigate to="/login" state={{ from: location }} replace />;
