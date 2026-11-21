@@ -18,6 +18,7 @@ let baseUrl;
 
 const testEnv = {
   ...process.env,
+  NODE_ENV: 'test',
   DATABASE_URL: testDatabaseUrl,
   JWT_SECRET: testJwtSecret,
   PORT: '4000',
@@ -37,6 +38,7 @@ before(async () => {
   process.env.JWT_SECRET = testJwtSecret;
   process.env.PORT = '4000';
   process.env.CORS_ORIGINS = 'http://localhost:5173';
+  process.env.NODE_ENV = 'test';
 
   runNodeScript('scripts/prepare-sqlite.js');
   runNodeScript('node_modules/prisma/build/index.js', ['migrate', 'deploy']);

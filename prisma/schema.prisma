@@ -241,6 +241,7 @@ model StockMovement {
   quantity        Int
   referenceType   String
   referenceId     String?
+  notes           String?
   createdByUserId String
   createdAt       DateTime          @default(now())
   product         Product           @relation(fields: [productId], references: [id], onDelete: Restrict)
@@ -295,6 +296,7 @@ model Quote {
   validUntil      DateTime?
   createdByUserId String
   createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
   lead            Lead          @relation(fields: [leadId], references: [id], onDelete: Restrict)
   customer        Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
   bomTemplate     BOMTemplate   @relation(fields: [bomTemplateId], references: [id], onDelete: Restrict)

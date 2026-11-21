@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { z } from 'zod';
 import * as authController from '../controllers/authController.js';
 import { authenticate } from '../middleware/authenticate.js';
+import { authRateLimit } from '../middleware/authRateLimit.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
 import { validate } from '../utils/validate.js';
 
@@ -12,7 +13,7 @@ const loginSchema = z.object({
   password: z.string().min(1),
 });
 
-router.post('/login', validate(loginSchema), asyncHandler(authController.login));
+router.post('/login', authRateLimit, validate(loginSchema), asyncHandler(authController.login));
 router.get('/me', authenticate, asyncHandler(authController.me));
 
 export default router;
