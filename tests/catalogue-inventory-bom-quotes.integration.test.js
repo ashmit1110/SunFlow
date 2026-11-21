@@ -13,6 +13,7 @@ const testDatabaseUrl = `file:./${testDatabaseName}`;
 const testJwtSecret = 'sunflow-catalogue-bom-quotes-integration-secret';
 const testEnv = {
   ...process.env,
+  NODE_ENV: 'test',
   DATABASE_URL: testDatabaseUrl,
   JWT_SECRET: testJwtSecret,
   PORT: '4000',
@@ -32,6 +33,7 @@ before(async () => {
   process.env.JWT_SECRET = testJwtSecret;
   process.env.PORT = '4000';
   process.env.CORS_ORIGINS = 'http://localhost:5173';
+  process.env.NODE_ENV = 'test';
   runNodeScript('scripts/prepare-sqlite.js');
   runNodeScript('node_modules/prisma/build/index.js', ['migrate', 'deploy']);
   runNodeScript('prisma/seed.js');
@@ -83,7 +85,7 @@ async function createApprovedLead(salesToken, suffix) {
       customerPhone: `97${Date.now().toString().slice(-7)}${String(Math.floor(Math.random() * 100)).padStart(2, '0')}`,
       customerAddress: '1 Demo Road',
       requestedCapacityKw: 1.25,
-      systemTypeInterest: 'ON_GRID',
+      systemTypeInterest: 'OFF_GRID',
       subsidyInterest: false,
     },
   });
@@ -178,14 +180,14 @@ test('Product catalogue, inventory, BOM, and quotation workflows', async (t) => 
     const invalidItem = await request('/api/bom-templates', {
       method: 'POST', token: adminToken,
       body: {
-        name: 'Invalid template', systemType: 'ON_GRID', minCapacityKw: 1, maxCapacityKw: 2,
+        name: 'Invalid template', systemType: 'OFF_GRID', minCapacityKw: 1, maxCapacityKw: 2,
         items: [{ productId: panel.body.data.id, quantityPerKw: 2, quantityFixed: 1 }],
       },
     });
     const created = await request('/api/bom-templates', {
       method: 'POST', token: adminToken,
       body: {
-        name: `On-grid ${suffix}`, systemType: 'ON_GRID', minCapacityKw: 1, maxCapacityKw: 2,
+        name: `Off-grid ${suffix}`, systemType: 'OFF_GRID', minCapacityKw: 1, maxCapacityKw: 2,
         items: [
           { productId: panel.body.data.id, quantityPerKw: 2 },
           { productId: connector.body.data.id, quantityFixed: 1 },
@@ -195,15 +197,15 @@ test('Product catalogue, inventory, BOM, and quotation workflows', async (t) => 
     const overlap = await request('/api/bom-templates', {
       method: 'POST', token: adminToken,
       body: {
-        name: 'Overlapping template', systemType: 'ON_GRID', minCapacityKw: 1.5, maxCapacityKw: 2.5,
+        name: 'Overlapping template', systemType: 'OFF_GRID', minCapacityKw: 1.5, maxCapacityKw: 2.5,
         items: [{ productId: panel.body.data.id, quantityFixed: 1 }],
       },
     });
     const resolved = await request('/api/bom-templates/resolve', {
-      method: 'POST', token: salesToken, body: { systemType: 'ON_GRID', capacityKw: 1.25 },
+      method: 'POST', token: salesToken, body: { systemType: 'OFF_GRID', capacityKw: 1.25 },
     });
     const missing = await request('/api/bom-templates/resolve', {
-      method: 'POST', token: salesToken, body: { systemType: 'OFF_GRID', capacityKw: 1.25 },
+      method: 'POST', token: salesToken, body: { systemType: 'OFF_GRID', capacityKw: 3 },
     });
     assert.equal(invalidItem.status, 400);
     assert.equal(created.status, 201);
@@ -220,19 +222,19 @@ test('Product catalogue, inventory, BOM, and quotation workflows', async (t) => 
       method: 'POST', token: salesToken,
       body: {
         customerName: 'Unapproved customer', customerPhone: `98${Date.now().toString().slice(-8)}`,
-        customerAddress: '2 Demo Road', requestedCapacityKw: 1.25, systemTypeInterest: 'ON_GRID', subsidyInterest: false,
+        customerAddress: '2 Demo Road', requestedCapacityKw: 1.25, systemTypeInterest: 'OFF_GRID', subsidyInterest: false,
       },
     });
     const blockedQuote = await request(`/api/leads/${unapprovedLead.body.data.lead.id}/quotes`, {
       method: 'POST', token: salesToken,
-      body: { systemType: 'ON_GRID', capacityKw: 1.25, discount: '1.00', tax: '0.50' },
+      body: { systemType: 'OFF_GRID', capacityKw: 1.25, discount: '1.00', tax: '0.50' },
     });
     assert.equal(blockedQuote.status, 409);
 
     const leadId = await createApprovedLead(salesToken, 'Q');
     const quoteResponse = await request(`/api/leads/${leadId}/quotes`, {
       method: 'POST', token: salesToken,
-      body: { systemType: 'ON_GRID', capacityKw: 1.25, discount: '1.00', tax: '0.50', validUntil: '2026-12-15' },
+      body: { systemType: 'OFF_GRID', capacityKw: 1.25, discount: '1.00', tax: '0.50', validUntil: '2026-12-15' },
     });
     assert.equal(quoteResponse.status, 201);
     assert.equal(quoteResponse.body.data.subtotal, '33.50');
@@ -273,7 +275,7 @@ test('Product catalogue, inventory, BOM, and quotation workflows', async (t) => 
   await t.test('rejects quotes and rolls back quote acceptance when order creation fails', async () => {
     const rejectLeadId = await createApprovedLead(salesToken, 'R');
     const rejectQuote = await request(`/api/leads/${rejectLeadId}/quotes`, {
-      method: 'POST', token: salesToken, body: { systemType: 'ON_GRID', capacityKw: 1.25 },
+      method: 'POST', token: salesToken, body: { systemType: 'OFF_GRID', capacityKw: 1.25 },
     });
     const rejected = await request(`/api/quotes/${rejectQuote.body.data.id}/reject`, { method: 'POST', token: salesToken });
     assert.equal(rejected.status, 200);
@@ -281,7 +283,7 @@ test('Product catalogue, inventory, BOM, and quotation workflows', async (t) => 
 
     const rollbackLeadId = await createApprovedLead(salesToken, 'T');
     const rollbackQuote = await request(`/api/leads/${rollbackLeadId}/quotes`, {
-      method: 'POST', token: salesToken, body: { systemType: 'ON_GRID', capacityKw: 1.25 },
+      method: 'POST', token: salesToken, body: { systemType: 'OFF_GRID', capacityKw: 1.25 },
     });
     await request(`/api/quotes/${rollbackQuote.body.data.id}/send`, { method: 'POST', token: salesToken });
     const lead = await prisma.lead.findUnique({ where: { id: rollbackLeadId } });

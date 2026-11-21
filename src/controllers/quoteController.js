@@ -5,6 +5,10 @@ export async function create(req, res) {
   res.status(201).json({ data: quote });
 }
 
+export async function list(req, res) {
+  res.status(200).json(await quoteService.listQuotes(req.validated.query));
+}
+
 export async function get(req, res) {
   res.status(200).json({ data: await quoteService.getQuote(req.validated.params.id) });
 }

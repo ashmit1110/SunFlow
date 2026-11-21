@@ -1,14 +1,21 @@
 import { Router } from 'express';
-import { SystemType } from '@prisma/client';
+import { QuoteStatus, SystemType } from '@prisma/client';
 import { z } from 'zod';
 import * as quoteController from '../controllers/quoteController.js';
 import { authenticate } from '../middleware/authenticate.js';
 import { authorize } from '../middleware/authorize.js';
 import { asyncHandler } from '../utils/asyncHandler.js';
+import { paginationSchema } from '../utils/pagination.js';
 import { validate } from '../utils/validate.js';
 
 const router = Router();
 const idSchema = z.object({ id: z.string().min(1) });
+const listSchema = paginationSchema.extend({
+  status: z.enum(Object.values(QuoteStatus)).optional(),
+  leadId: z.string().min(1).optional(),
+  customerId: z.string().min(1).optional(),
+  search: z.string().trim().min(1).max(128).optional(),
+});
 const leadIdSchema = z.object({ leadId: z.string().min(1) });
 const moneyString = z.string().regex(/^(?:0|[1-9]\d{0,7})(?:\.\d{1,2})?$/, 'amount must be a non-negative decimal with up to 2 places');
 const createSchema = z.object({
@@ -27,6 +34,7 @@ const updateItemsSchema = z.object({
 });
 
 const quoteAccess = [authenticate, authorize(['SALES', 'ADMIN'])];
+router.get('/quotes', ...quoteAccess, validate(listSchema, 'query'), asyncHandler(quoteController.list));
 router.post('/leads/:leadId/quotes', ...quoteAccess, validate(leadIdSchema, 'params'), validate(createSchema), asyncHandler(quoteController.create));
 router.get('/quotes/:id', ...quoteAccess, validate(idSchema, 'params'), asyncHandler(quoteController.get));
 router.patch('/quotes/:id/items', ...quoteAccess, validate(idSchema, 'params'), validate(updateItemsSchema), asyncHandler(quoteController.updateItems));

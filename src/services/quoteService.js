@@ -1,13 +1,16 @@
 import { LeadStatus, QuoteStatus } from '@prisma/client';
 import { prisma } from '../config/database.js';
 import { conflictError, notFoundError, validationError } from '../utils/errors.js';
-import { decimal, serializeQuote } from '../utils/money.js';
+import { decimal } from '../utils/money.js';
+import { paginationArgs, paginationMeta } from '../utils/pagination.js';
+import { quoteNumber, serializeQuoteDetails } from '../utils/serialization.js';
 import { resolveBom } from './bomService.js';
 
 const quoteInclude = {
+  customer: { select: { id: true, name: true, phone: true, email: true, address: true } },
   items: {
     orderBy: { id: 'asc' },
-    include: { product: { select: { id: true, sku: true, name: true, category: true, unit: true, unitPrice: true } } },
+    include: { product: { select: { id: true, sku: true, name: true, category: true, unit: true, unitPrice: true, isSerialized: true } } },
   },
 };
 
@@ -55,14 +58,42 @@ export async function createQuote(leadId, input, userId) {
       include: quoteInclude,
     });
     await tx.lead.update({ where: { id: leadId }, data: { status: LeadStatus.QUOTED } });
-    return serializeQuote(quote);
+    return serializeQuoteDetails(quote);
   });
 }
 
 export async function getQuote(id) {
   const quote = await prisma.quote.findUnique({ where: { id }, include: quoteInclude });
   if (!quote) throw notFoundError('Quote not found');
-  return serializeQuote(quote);
+  return serializeQuoteDetails(quote);
+}
+
+export async function listQuotes(query) {
+  const where = {
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.leadId ? { leadId: query.leadId } : {}),
+    ...(query.customerId ? { customerId: query.customerId } : {}),
+  };
+  if (query.search) {
+    const yearMatch = query.search.match(/^Q-(\d{4})/i);
+    const idSearch = query.search.replace(/^Q-\d{4}-/i, '');
+    const searchClauses = [
+      { id: { contains: idSearch || query.search } },
+      { customer: { name: { contains: query.search } } },
+      { customer: { phone: { contains: query.search } } },
+      { customer: { email: { contains: query.search } } },
+    ];
+    if (yearMatch) {
+      const year = Number(yearMatch[1]);
+      searchClauses.push({ createdAt: { gte: new Date(Date.UTC(year, 0, 1)), lt: new Date(Date.UTC(year + 1, 0, 1)) } });
+    }
+    where.AND = [...(where.AND ?? []), { OR: searchClauses }];
+  }
+  const [quotes, total] = await prisma.$transaction([
+    prisma.quote.findMany({ where, ...paginationArgs(query), orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], include: quoteInclude }),
+    prisma.quote.count({ where }),
+  ]);
+  return { data: quotes.map(serializeQuoteDetails), meta: paginationMeta(query, total) };
 }
 
 export async function updateQuoteItems(id, requestedItems) {
@@ -104,7 +135,7 @@ export async function updateQuoteItems(id, requestedItems) {
       data: { subtotal, total },
       include: quoteInclude,
     });
-    return serializeQuote(updated);
+    return serializeQuoteDetails(updated);
   });
 }
 
@@ -113,14 +144,14 @@ export async function sendQuote(id) {
     const quote = await tx.quote.findUnique({ where: { id } });
     if (!quote) throw notFoundError('Quote not found');
     if (quote.status !== QuoteStatus.DRAFT) throw conflictError('Only a DRAFT quote can be sent');
-    return serializeQuote(await tx.quote.update({ where: { id }, data: { status: QuoteStatus.SENT }, include: quoteInclude }));
+    return serializeQuoteDetails(await tx.quote.update({ where: { id }, data: { status: QuoteStatus.SENT }, include: quoteInclude }));
   });
 }
 
 export async function acceptQuote(id) {
   try {
     return await prisma.$transaction(async (tx) => {
-      const quote = await tx.quote.findUnique({ where: { id }, include: { lead: true } });
+      const quote = await tx.quote.findUnique({ where: { id }, include: { lead: true, customer: { select: { id: true, name: true, phone: true, email: true } } } });
       if (!quote) throw notFoundError('Quote not found');
       if (quote.status !== QuoteStatus.SENT) throw conflictError('Only a SENT quote can be accepted');
       if (quote.lead.status !== LeadStatus.QUOTED) {
@@ -141,12 +172,18 @@ export async function acceptQuote(id) {
       await tx.lead.update({ where: { id: quote.leadId }, data: { status: LeadStatus.CONVERTED } });
 
       return {
-        quote: { id: acceptedQuote.id, status: acceptedQuote.status },
+        quote: { id: acceptedQuote.id, quoteNumber: quoteNumber(acceptedQuote), status: acceptedQuote.status },
         order: {
           id: order.id,
+          quoteId: order.quoteId,
+          customerId: order.customerId,
           status: order.status,
           totalAmount: order.totalAmount.toFixed(2),
+          advancePaid: order.advancePaid.toFixed(2),
           balanceDue: order.balanceDue.toFixed(2),
+          scheduledDate: order.scheduledDate,
+          createdAt: order.createdAt,
+          customer: quote.customer,
         },
       };
     });
@@ -163,6 +200,6 @@ export async function rejectQuote(id) {
     if (![QuoteStatus.DRAFT, QuoteStatus.SENT].includes(quote.status)) {
       throw conflictError('Only a DRAFT or SENT quote can be rejected');
     }
-    return serializeQuote(await tx.quote.update({ where: { id }, data: { status: QuoteStatus.REJECTED }, include: quoteInclude }));
+    return serializeQuoteDetails(await tx.quote.update({ where: { id }, data: { status: QuoteStatus.REJECTED }, include: quoteInclude }));
   });
 }

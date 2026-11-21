@@ -789,3 +789,123 @@ Run with:
 ```bash
 npm test
 ```
+
+# Orders, Payments, Dispatch, Equipment, Installation, Service, Dashboard
+
+These routes complete the quote-to-installation and after-sales workflow. Every request requires `Authorization: Bearer <JWT>`. Single resources return `{ "data": { ... } }`; collections return `{ "data": [...], "meta": { "page": 1, "pageSize": 20, "total": 1 } }` unless noted. Decimal money values are strings with two fractional digits. Error responses use the `error` envelope described above.
+
+## Authentication
+
+| Method and path | Roles | Request | Success |
+|---|---|---|---|
+| `POST /api/auth/login` | Public, rate limited | `{ "email": "priya@sunpower.demo", "password": "demo1234" }` | `200 { "data": { "token": "<JWT>", "user": { "id": "...", "name": "...", "role": "SALES" } } }` |
+| `GET /api/auth/me` | Any authenticated role | None | `200 { "data": { "id": "...", "name": "...", "role": "SALES" } }` |
+
+Development seed password is `demo1234`; use the role accounts listed below. Login is limited to 10 failed attempts per IP in a 15-minute window. Successful logins do not consume the limit. Production requires a unique, random JWT secret with at least 64 characters.
+
+## Orders and payment
+
+| Method and path | Roles | Request/query | Success |
+|---|---|---|---|
+| `GET /api/orders` | `SALES`, `WAREHOUSE`, `ADMIN` | `page`, `pageSize`, optional `status` | `200` paginated orders with customer, quote, and order summary |
+| `GET /api/orders/:id` | `SALES`, `WAREHOUSE`, `ADMIN` | None | `200` order with customer, quote item price snapshots, payments, dispatches and installation |
+| `GET /api/orders/:id/picking-list` | `WAREHOUSE`, `ADMIN` | None | `200 { "data": { "orderId": "...", "serializedRequirements": [...], "nonSerializedRequirements": [...] } }` |
+| `POST /api/orders/:id/cancel` | `SALES`, `ADMIN` | No body | `200` updated order; only cancellable orders can be cancelled. Prepared dispatch reservations are released with the cancellation. |
+| `POST /api/orders/:id/expenses` | `ADMIN`, `WAREHOUSE` | `{ "type": "TRANSPORT", "amount": "250.00", "description": "Delivery" }`; description optional | `201` created expense record |
+| `POST /api/orders/:id/payments` | `SALES`, `ADMIN` | `{ "amount": "10000.00", "type": "ADVANCE", "method": "UPI" }` | `201` payment and updated order payment totals |
+| `GET /api/orders/:id/payments` | `SALES`, `ADMIN` | `page`, `pageSize` | `200` paginated payments |
+| `POST /api/orders/:id/assign-technician` | `SALES`, `ADMIN` | `{ "technicianUserId": "...", "scheduledDate": "2026-11-22T09:00:00.000Z" }`; date optional | `200` updated order and installation record |
+
+Payment types are the schema enum `ADVANCE`, `MILESTONE`, `FULL`; methods are `CASH`, `BANK_TRANSFER`, `CARD`, `UPI`, `CHEQUE`, `OTHER`. Amount must be a positive decimal string with up to two places; overpayment is rejected. Expense types are the `JobExpenseType` enum. Cancellation after dispatch has started is rejected.
+
+## Dispatch and stock
+
+| Method and path | Roles | Request | Success |
+|---|---|---|---|
+| `POST /api/orders/:id/dispatches` | `WAREHOUSE`, `ADMIN` | `{ "serializedEquipmentIds": ["..."], "nonSerializedItems": [{ "productId": "...", "quantity": 9 }] }`; both arrays default to empty | `201` prepared dispatch |
+| `POST /api/dispatches/:id/confirm` | `WAREHOUSE`, `ADMIN` | No body | `200` dispatched record; response includes order status `DISPATCHED` |
+| `POST /api/dispatches/:id/deliver` | `WAREHOUSE`, `TECHNICIAN`, `ADMIN` | No body | `200` delivered record |
+| `GET /api/dispatches/:id` | `WAREHOUSE`, `ADMIN` | None | `200` dispatch with items, serial equipment and order |
+
+Preparation verifies selected products and quantities against the frozen quote BOM, reserves serialized units, and checks stock. Confirmation rechecks stock inside a transaction, decrements each non-serialized item, records one `OUTBOUND` stock movement per item, marks serials `DISPATCHED`, and advances the order. Insufficient or changed stock returns `422 UNPROCESSABLE`; repeating confirmation returns `409 CONFLICT`.
+
+## Equipment
+
+| Method and path | Roles | Request/query | Success |
+|---|---|---|---|
+| `POST /api/equipment` | `WAREHOUSE`, `ADMIN` | `{ "serialNumber": "INV-0001", "productId": "...", "manufacturer": "Example", "model": "1P" }`; manufacturer/model optional | `201` serialized equipment |
+| `GET /api/equipment` | `WAREHOUSE`, `ADMIN`, `SUPPORT` | `page`, `pageSize`, optional `status`, `productId` | `200` paginated equipment |
+| `GET /api/equipment/:serial` | `WAREHOUSE`, `ADMIN`, `SUPPORT` | Serial number in URL | `200` equipment detail |
+| `GET /api/equipment/:serial/passport` | `WAREHOUSE`, `ADMIN`, `SUPPORT` | Serial number in URL | `200` equipment, current customer, warranty, installation/photos and service history |
+
+Serial numbers are unique, only serialized catalogue products may be registered, and status changes follow the dispatch/installation workflow. Warranty status in the passport is calculated from its dates.
+
+## Installation
+
+Installation photo and signature endpoints use `multipart/form-data`, not JSON. Only the assigned technician can start, update the checklist, upload photos, or upload the customer signature. Photo upload field name is `photos` (up to 10 image files); signature upload field name is `signature` (one image file). Uploads accept JPEG or PNG image content, up to 8 MB per file. Photo upload returns persisted metadata and a protected `fileUrl`; signature upload returns `{ "signatureImagePath": "installations/<id>/<file>", "customerSignedName": "Customer Name" }` and is stored as installation evidence. Photo file access is scoped to the installation.
+
+| Method and path | Roles | Request | Success |
+|---|---|---|---|
+| `GET /api/installations/my` | `TECHNICIAN` | `page`, `pageSize` | `200` paginated installations assigned to the caller |
+| `GET /api/installations/:id` | Assigned `TECHNICIAN`, `SALES`, `ADMIN` | None | `200` installation and order detail |
+| `POST /api/orders/:id/assign-technician` | `SALES`, `ADMIN` | See Orders table | `200` installation record with order detail |
+| `PATCH /api/installations/:id/start` | Assigned `TECHNICIAN` | No body | `200` updated installation |
+| `PATCH /api/installations/:id/checklist` | Assigned `TECHNICIAN` | `{ "checklist": { "panelsMounted": true, "inverterConnected": true, "generationTested": true }, "confirmedCapacityKw": 3 }`; either field may be updated | `200` updated installation |
+| `POST /api/installations/:id/photos` | Assigned `TECHNICIAN` | Multipart `photos` (one or more files), optional `caption` text field | `201 { "data": [...] }` photo records |
+| `POST /api/installations/:id/signature` | Assigned `TECHNICIAN` | Multipart `signature` image and `customerSignedName` text | `201` signature metadata |
+| `POST /api/installations/:id/complete` | Assigned `TECHNICIAN`, `ADMIN` | `{ "confirmedCapacityKw": 3, "customerSignedName": "Customer Name" }` | `200 { "data": { "installationRecord": {...}, "order": {...}, "warrantiesCreated": 1 } }` |
+| `GET /api/installations/:id/photos/:photoId/file` | Assigned `TECHNICIAN`, `SALES`, `ADMIN`, `SUPPORT` | None; authenticated file request | `200` image bytes |
+
+Completion requires the checklist to be complete, a captured customer signature, and a valid capacity. It atomically marks the installation/order complete, updates dispatched serials to installed, and creates warranty records from product warranty terms. `ADMIN` may complete an installation; technician ownership still applies to technician-only operations.
+
+## Service tickets
+
+All routes require `SUPPORT` or `ADMIN`.
+
+| Method and path | Request/query | Success |
+|---|---|---|
+| `POST /api/service-tickets` | `{ "serialNumber": "INV-0001", "issueDescription": "Intermittent fault", "faultCode": "E-01" }`; faultCode optional | `201` ticket with associated unit/customer and calculated warranty coverage |
+| `GET /api/service-tickets` | `page`, `pageSize`, optional `status`, `customerId` | `200` paginated tickets |
+| `GET /api/service-tickets/:id` | None | `200` ticket with charges and equipment history |
+| `PATCH /api/service-tickets/:id/status` | `{ "status": "IN_PROGRESS" }`; optional `warrantyCovered` boolean may accompany an update | `200` updated ticket |
+| `POST /api/service-tickets/:id/charges` | `{ "description": "Replacement fuse", "amount": "45.00", "type": "PART" }`; type is `PART` or `LABOUR` | `201` updated ticket with charge |
+
+Allowed ticket states follow `OPEN → IN_PROGRESS → (AWAITING_PARTS ⇄ IN_PROGRESS) → RESOLVED → CLOSED`; invalid transitions return `409`. Warranty coverage is initialized from the equipment warranty and can be overridden by support/admin. A pre-installation ticket cannot currently be created: `ServiceTicket.customerId` is required in the existing database model and the API contract has no customer ID field. This schema/API mismatch is reported as an outstanding specification issue.
+
+## Dashboard
+
+| Method and path | Roles | Query | Success |
+|---|---|---|---|
+| `GET /api/dashboard/summary` | `ADMIN` | `range=today`, `week`, or `month` (default `month`) | `200` counts and persisted payment/expense aggregates for the range |
+| `GET /api/dashboard/orders-profitability` | `ADMIN` | None | `200` per-order total, recorded payments/expenses, BOM cost and estimated margin |
+| `GET /api/dashboard/service-overview` | `ADMIN`, `SUPPORT` | None | `200` ticket counts grouped by status |
+
+Dashboard values are calculated from database records. Recorded revenue is the sum of non-service payment records for summary reporting; estimated margin is recorded non-service payments minus quote item line totals (the documented catalogue-price proxy for BOM cost) and recorded job expenses. This is explicitly an estimate, not audited profit.
+
+## Quotes list and acceptance
+
+`GET /api/quotes` is available to `SALES` and `ADMIN`. It accepts `page`, `pageSize`, and optional `status`, `leadId`, `customerId`, and case-insensitive `search` (customer name, phone, email, or quote ID/number). Results include `quoteNumber`, customer, lead, items with `unitPriceAtQuote` and `lineTotal`, and quote totals. `quoteNumber` is a stable presentation identifier derived from the quote creation year and persisted quote ID because the current Prisma schema does not include a quote-number field.
+
+Acceptance remains `POST /api/quotes/:id/accept` as described above and returns both the accepted quote and the created installation order with customer and totals. Duplicate acceptance is rejected and cannot create a second order.
+
+## Development demo data
+
+Run `npm run db:seed` after `npm run db:migrate`. Seed records are idempotently upserted. Development accounts (all use password `demo1234`):
+
+| Role | Email |
+|---|---|
+| `ADMIN` | `admin@sunpower.demo` |
+| `SALES` | `priya@sunpower.demo` |
+| `WAREHOUSE` | `raghav@sunpower.demo` |
+| `TECHNICIAN` | `arjun@sunpower.demo` |
+| `SUPPORT` | `meera@sunpower.demo` |
+
+These are development-only credentials. The seed includes demo products, stock, serialized equipment, an active BOM template, an approved survey, a quote ready to accept, a separate operations order, and a recorded advance payment.
+
+## Manual smoke-test sequence
+
+1. Login as Sales; retain the returned JWT and request the quote list.
+2. Accept the `SENT` demo quote. Read the returned order ID and view its picking list.
+3. Login as Warehouse. Prepare a dispatch using the quote BOM quantities and `DEMO-INV-0001`; confirm and deliver it. The response and stock ledger show the inventory movement.
+4. Login as Sales and assign the order to the demo technician. Login as that technician, start the installation, complete all checklist values, upload a photo and signature, then complete the installation.
+5. Login as Support. Read the equipment passport and open/update a ticket; login as Admin for dashboard aggregates.
